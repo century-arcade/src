@@ -1,0 +1,25 @@
+include $(ARCADE)/src/Makefile
+
+FROTZOS := $(ARCADE)/src/frotzos
+
+$(ARCADE)/images/busybox.frotz: busybox-build-setup
+	ARCADE=$(ARCADE) make -C $(BUSYBOXDIR) all
+	cp $(BUSYBOXDIR)/busybox $(ARCADE)/images/busybox.frotz
+
+frotz: initramfs-setup $(ARCADE)/images/busybox.frotz
+	make -C $(FROTZOS)/frotz frotz-curses
+	cp $(FROTZOS)/frotz/frotz $(INITRAMFS)/bin/
+	cd $(INITRAMFS)/bin ; ln -s busybox sh ; ln -s busybox init
+
+$(ARCADE)/images/bzImage.frotz: linux-build-setup frotz
+	cp $(ARCADE)/images/busybox.frotz $(INITRAMFS)/bin/busybox
+	ARCADE=$(ARCADE) make -C $(LINUXDIR) all
+	cp $(LINUXDIR)/arch/x86/boot/bzImage $(ARCADE)/images/bzImage.frotz
+
+frotz-install:
+	mkdir -p $(ISOROOT)/boot/isolinux
+	cp $(ARCADE)/images/bzImage.frotz $(ISOROOT)/boot/bzImage
+	cp $(ARCADE)/images/isolinux.bin $(ISOROOT)/boot/
+	cp $(FROTZOS)/isolinux.cfg $(ISOROOT)/boot/isolinux/
+	cp $(FROTZOS)/frotz.conf $(ISOROOT)/
+

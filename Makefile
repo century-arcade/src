@@ -1,5 +1,17 @@
+PUBL ?= PUBLISHER_ID
+PREP ?= PREPARER_ID
+SYSI ?= SYSTEM_ID
+VOLI ?= VOLUME_ID
+VOLS ?= VOLUMESET_ID
+ABST ?= ABSTRACT_FILE
+APPI ?= APPLICATION_ID
+COPY ?= COPYRIGHT_FILE
+BIBL ?= BIBLIOGRAPHIC_FILE
+
 ARCADE ?= /opt/arcade
 DOWNLOADS := $(ARCADE)/downloads
+BUILDDIR := $(ARCADE)/build
+
 WGET := wget --directory-prefix=$(DOWNLOADS)
 
 BUILDROOT_VER = 2013.08.1
@@ -35,39 +47,55 @@ buildroot: $(DOWNLOADS)/buildroot-$(BUILDROOT_VER).tar.bz2
 linux: $(ARCADE)/images/bzImage
 busybox: $(ARCADE)/images/busybox
 
-$(ARCADE)/images/bzImage: $(DOWNLOADS)/linux-$(LINUX_VER).tar.xz
+linux-build-setup: $(DOWNLOADS)/linux-$(LINUX_VER).tar.xz
 	mkdir -p $(ARCADE)/build
 	tar Jx -C $(ARCADE)/build -f $<
 	cp $(ARCADE)/src/linux.config $(LINUXDIR)/.config
-	ARCADE=$(ARCADE) make -C $(LINUXDIR) all
-	cp $(LINUXDIR)/arch/x86/boot/bzImage $(ARCADE)/images/
 	
-$(ARCADE)/images/busybox: $(DOWNLOADS)/busybox-$(BUSYBOX_VER).tar.bz2
+initramfs-setup: busybox
+	mkdir -p $(INITRAMFS)/dev
+	mkdir -p $(INITRAMFS)/proc
+	mkdir -p $(INITRAMFS)/sys
+	mkdir -p $(INITRAMFS)/bin
+	mkdir -p $(INITRAMFS)/etc
+	mkdir -p $(INITRAMFS)/usr/share/terminfo/l
+	cp $(ARCADE)/src/linuxrc $(INITRAMFS)/linuxrc
+	cp $(BR_TARGET)/usr/share/terminfo/l/linux $(INITRAMFS)/usr/share/terminfo/l/
+
+busybox-build-setup: $(DOWNLOADS)/busybox-$(BUSYBOX_VER).tar.bz2
 	mkdir -p $(ARCADE)/build
 	tar jx -C $(ARCADE)/build -f $<
 	cp $(ARCADE)/src/busybox.config $(BUSYBOXDIR)/.config
-	ARCADE=$(ARCADE) make -C $(BUSYBOXDIR) all
-	cp $(BUSYBOXDIR)/busybox $(ARCADE)/images/
 
-cdroot: linux busybox
-	make -C $(FROTZOS)/frotz frotz-curses
-	cp $(FROTZOS)/frotz/frotz $(ROOTFS)/bin/
-	cp $(FROTZOS)/frotz.conf $(ROOTFS)/etc
-	cp games/zork1.z5 $(ROOTFS)/
-	mkdir -p $(ROOTFS)/boot/isolinux
-	cp $(FROTZOS)/isolinux.cfg $(ROOTFS)/boot/isolinux/
-	cp /opt/arcade/images/isolinux.bin $(ROOTFS)/boot/
-	cp /opt/arcade/images/bzImage $(ROOTFS)/boot/
+ISOROOT := $(ARCADE)/isoroot
 
-ROOTFS := $(ARCADE)/isoroot
-
-$(ARCADE)/Zork1.iso: # cdroot
-	mkisofs -J -R -o $@ \
+# for constructing the output iso from the source .zip
+%.iso: BUILDTMP = $(BUILDDIR)/$(@F)
+%.iso: %.zip
+	rm -rf $(BUILDTMP)
+	mkdir -p $(BUILDTMP)
+	unzip -d $(BUILDTMP) $<
+	make -C $(BUILDTMP) -f $(notdir $(*F)).mk OUTPUTISO=$@ ARCADE=$(ARCADE)
+	mkisofs -J -R \
+		-iso-level 1 \
+		-no-pad \
+		-biblio    "$(BIBL)" \
+		-copyright "$(COPY)" \
+		-A         "$(APPI)" \
+		-abstract  "$(ABST)" \
+		-p         "$(PREP)" \
+		-publisher "$(PUBL)" \
+		-sysid     "$(SYSI)" \
+		-V         "$(VOLI)" \
+		-volset    "$(VOLS)" \
 		-b boot/isolinux.bin \
 		-c boot/boot.cat \
 		-no-emul-boot \
 		-boot-load-size 4 \
 		-boot-info-table \
-		$(ROOTFS)/
-
+		-input-charset=iso8859-1 \
+		-o $(BUILDTMP)/$(@F) \
+		$(ISOROOT)/
+	$(ARCADE)/src/tools/iso2zip $(BUILDTMP)/$(@F) -o $@
+	rm -rf $(BUILDTMP)
 

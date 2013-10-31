@@ -23,9 +23,9 @@ Futureproof bootable ready-to-play ISOs of classic games
 === To build the ISO for a game ===
 
 1) Download the game source package (like [LostPig-source.zip]())
-   put the .zip directly into $(ARCADE)/games/
+   put the .zip in $(ARCADE)/games/
 
-2) make -C $(ARCADE) $(GAME).iso
+2) Run ./buildiso.sh $(ARCADE)/games/LostPig-source.zip
    will create the .iso in current directory
 
 === Notes ===

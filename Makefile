@@ -34,8 +34,8 @@ else
 
 include $(GAMESRC)/BUILD
 
-ifndef PROJECT
-	$(error PROJECT must be set in $(GAMESRC)/BUILD)
+ifndef PLATFORM
+	$(error PLATFORM must be set in $(GAMESRC)/BUILD)
 endif
 
 ifndef GAME
@@ -54,8 +54,8 @@ BIBL ?= README         # BIBLIOGRAPHIC_FILE
 
 endif
 
-ifdef PROJECT
-BUILDDIR = $(ARCADE)/build.$(PROJECT)
+ifdef PLATFORM
+BUILDDIR = $(ARCADE)/build.$(PLATFORM)
 INITRAMFS = $(BUILDDIR)/initramfs
 BUSYBOXDIR = $(BUILDDIR)/busybox-$(BUSYBOX_VER)
 LINUXDIR = $(BUILDDIR)/linux-$(LINUX_VER)
@@ -63,7 +63,7 @@ LINUXDIR = $(BUILDDIR)/linux-$(LINUX_VER)
 BUSYBOX = $(BUSYBOXDIR)/busybox
 KERNEL = $(LINUXDIR)/arch/x86/boot/bzImage
 
-PROJECTSRC = $(ARCADE)/src/$(PROJECT)
+PLATFORMSRC = $(ARCADE)/src/$(PLATFORM)
 
 ifdef GAME
 ISOROOT = $(BUILDDIR)/$(GAME).isoroot
@@ -71,7 +71,7 @@ ISOROOT = $(BUILDDIR)/$(GAME).isoroot
 all: $(GAME).iso
 endif
 
-include $(ARCADE)/src/Makefile.$(PROJECT)
+include $(ARCADE)/src/Makefile.$(PLATFORM)
 
 $(DOWNLOADS)/linux-$(LINUX_VER).tar.xz:
 	$(WGET) https://www.kernel.org/pub/linux/kernel/v3.x/linux-$(LINUX_VER).tar.xz
@@ -82,12 +82,12 @@ $(DOWNLOADS)/busybox-$(BUSYBOX_VER).tar.bz2:
 $(BUSYBOXDIR)/.config: $(DOWNLOADS)/busybox-$(BUSYBOX_VER).tar.bz2
 	mkdir -p $(BUILDDIR)
 	tar jx -C $(BUILDDIR) -f $<
-	cp $(PROJECTSRC)/busybox.config $(BUSYBOXDIR)/.config
+	cp $(PLATFORMSRC)/busybox.config $(BUSYBOXDIR)/.config
 
 $(LINUXDIR)/.config: $(DOWNLOADS)/linux-$(LINUX_VER).tar.xz
 	mkdir -p $(BUILDDIR)
 	tar Jx -C $(BUILDDIR) -f $<
-	cp $(PROJECTSRC)/linux.config $(LINUXDIR)/.config
+	cp $(PLATFORMSRC)/linux.config $(LINUXDIR)/.config
 
 $(BUSYBOX): $(BUSYBOXDIR)/.config
 	ARCADE=$(ARCADE) make -C $(BUSYBOXDIR) all
@@ -96,16 +96,16 @@ $(KERNEL): $(LINUXDIR)/.config initramfs-setup
 	make -C $(LINUXDIR) all
 
 kernel-image: $(KERNEL)
-	cp $(KERNEL) $(ARCADE)/images/bzImage.$(PROJECT)
+	cp $(KERNEL) $(ARCADE)/images/bzImage.$(PLATFORM)
 	
 busybox-image: $(BUSYBOX)
-	cp $(BUSYBOX) $(ARCADE)/images/busybox.$(PROJECT)
+	cp $(BUSYBOX) $(ARCADE)/images/busybox.$(PLATFORM)
 
 save-busybox: busybox-image
-	cp $(BUSYBOXDIR)/.config $(PROJECTSRC)/busybox.config
+	cp $(BUSYBOXDIR)/.config $(PLATFORMSRC)/busybox.config
 
 save-linux: kernel-image
-	cp $(LINUXDIR)/.config $(PROJECTSRC)/linux.config
+	cp $(LINUXDIR)/.config $(PLATFORMSRC)/linux.config
 
 save-config: save-linux save-busybox
 
@@ -115,7 +115,7 @@ initramfs: $(BUSYBOX)
 	mkdir -p $(INITRAMFS)/sys
 	mkdir -p $(INITRAMFS)/bin
 	mkdir -p $(INITRAMFS)/etc
-	cp $(PROJECTSRC)/linuxrc $(INITRAMFS)/linuxrc
+	cp $(PLATFORMSRC)/linuxrc $(INITRAMFS)/linuxrc
 
 clean-iso:
 	rm -rf $(ISOROOT)
@@ -127,10 +127,10 @@ iso-setup: clean-iso
 %.isoroot: kernel-image iso-setup
 	mkdir -p $(ISOROOT)/boot/isolinux
 	cp $(ARCADE)/images/isolinux.bin $(ISOROOT)/boot/
-	cp $(ARCADE)/images/bzImage.$(PROJECT) $(ISOROOT)/boot/bzImage
-	cp $(PROJECTSRC)/isolinux.cfg $(ISOROOT)/boot/isolinux/
+	cp $(ARCADE)/images/bzImage.$(PLATFORM) $(ISOROOT)/boot/bzImage
+	cp $(PLATFORMSRC)/isolinux.cfg $(ISOROOT)/boot/isolinux/
 
-%.iso: %.isoroot $(PROJECT)
+%.iso: %.isoroot $(PLATFORM)
 	mkisofs -J -R \
 		-iso-level 1 \
 		-no-pad \

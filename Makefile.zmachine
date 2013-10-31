@@ -1,11 +1,11 @@
 
-FROTZ = $(PROJECTSRC)/frotz/frotz 
+FROTZ = $(PLATFORMSRC)/frotz/frotz 
 
 frotzos: $(KERNEL)
-	cp $(PROJECTSRC)/frotz.conf $(ISOROOT)/
+	cp $(PLATFORMSRC)/frotz.conf $(ISOROOT)/
 
 $(FROTZ):
-	make -C $(PROJECTSRC)/frotz frotz-curses
+	make -C $(PLATFORMSRC)/frotz frotz-curses
 
 # so frotz bin gets copied
 initramfs-setup: frotz-initramfs
@@ -16,5 +16,5 @@ frotz-initramfs: initramfs $(BUSYBOX) $(FROTZ)
 	cp $(BUSYBOX) $(INITRAMFS)/bin/busybox
 	cd $(INITRAMFS)/bin ; ln -sf busybox sh
 	cp $(FROTZ) $(INITRAMFS)/bin/frotz
-	cp $(PROJECTSRC)/init.sh $(INITRAMFS)/init
+	cp $(PLATFORMSRC)/init.sh $(INITRAMFS)/init
 

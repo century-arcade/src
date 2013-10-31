@@ -20,6 +20,8 @@ Futureproof bootable ready-to-play ISOs of classic games
 
     This will setup buildroot, build the toolchain, and clone the git repositories into src and www.  Note: This downloads ~200MB and uses 2.5GB of disk.
 
+6) add $(ARCADE)/host/usr/bin/ to your PATH
+
 === To build the ISO for a game ===
 
 1) Download the game source package (like [LostPig-source.zip]())

@@ -1,7 +1,7 @@
 
 FROTZ = $(PLATFORMSRC)/frotz/frotz 
 
-frotzos: $(KERNEL)
+zmachine: $(KERNEL)
 	cp $(PLATFORMSRC)/frotz.conf $(ISOROOT)/
 
 $(FROTZ):

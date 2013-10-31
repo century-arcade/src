@@ -1,15 +1,16 @@
 -include .arcaderc
 ARCADE ?= /opt/arcade
 
-DOWNLOADS = $(ARCADE)/downloads
-WGET := wget --directory-prefix=$(DOWNLOADS)
 VANITY_HASH= --digest=sha1 --bits=32 10decade
-
-ifndef GAMESRC
 
 BUILDROOT_VER = 2013.08.1
 LINUX_VER = 3.10.17
 BUSYBOX_VER = 1.21.1
+
+DOWNLOADS = $(ARCADE)/downloads
+WGET := wget --directory-prefix=$(DOWNLOADS)
+
+ifndef GAMESRC
 
 BUILDROOTDIR = $(ARCADE)/build/buildroot-$(BUILDROOT_VER)
 
@@ -35,11 +36,11 @@ else
 include $(GAMESRC)/BUILD
 
 ifndef PLATFORM
-	$(error PLATFORM must be set in $(GAMESRC)/BUILD)
+$(error PLATFORM must be set in $(GAMESRC)/BUILD)
 endif
 
 ifndef GAME
-	$(error GAME must be set in $(GAMESRC)/BUILD)
+$(error GAME must be set in $(GAMESRC)/BUILD)
 endif
 
 PUBL ?= Century Arcade # PUBLISHER_ID
@@ -56,12 +57,13 @@ endif
 
 ifdef PLATFORM
 BUILDDIR = $(ARCADE)/build.$(PLATFORM)
-INITRAMFS = $(BUILDDIR)/initramfs
-BUSYBOXDIR = $(BUILDDIR)/busybox-$(BUSYBOX_VER)
-LINUXDIR = $(BUILDDIR)/linux-$(LINUX_VER)
 
-BUSYBOX = $(BUSYBOXDIR)/busybox
+LINUXDIR = $(BUILDDIR)/linux-$(LINUX_VER)
+INITRAMFS = $(LINUXDIR)/initramfs
 KERNEL = $(LINUXDIR)/arch/x86/boot/bzImage
+
+BUSYBOXDIR = $(BUILDDIR)/busybox-$(BUSYBOX_VER)
+BUSYBOX = $(BUSYBOXDIR)/busybox
 
 PLATFORMSRC = $(ARCADE)/src/$(PLATFORM)
 
@@ -79,14 +81,20 @@ $(DOWNLOADS)/linux-$(LINUX_VER).tar.xz:
 $(DOWNLOADS)/busybox-$(BUSYBOX_VER).tar.bz2:
 	$(WGET) http://www.busybox.net/downloads/busybox-$(BUSYBOX_VER).tar.bz2
 
-$(BUSYBOXDIR)/.config: $(DOWNLOADS)/busybox-$(BUSYBOX_VER).tar.bz2
+$(BUSYBOXDIR)/Makefile: $(DOWNLOADS)/busybox-$(BUSYBOX_VER).tar.bz2
 	mkdir -p $(BUILDDIR)
 	tar jx -C $(BUILDDIR) -f $<
-	cp $(PLATFORMSRC)/busybox.config $(BUSYBOXDIR)/.config
+	touch $(BUSYBOXDIR)/Makefile
 
-$(LINUXDIR)/.config: $(DOWNLOADS)/linux-$(LINUX_VER).tar.xz
+$(LINUXDIR)/Makefile: $(DOWNLOADS)/linux-$(LINUX_VER).tar.xz
 	mkdir -p $(BUILDDIR)
 	tar Jx -C $(BUILDDIR) -f $<
+	touch $(LINUXDIR)/Makefile
+
+$(BUSYBOXDIR)/.config: $(PLATFORMSRC)/busybox.config
+	cp $(PLATFORMSRC)/busybox.config $(BUSYBOXDIR)/.config
+
+$(LINUXDIR)/.config: $(PLATFORMSRC)/linux.config $(LINUXDIR)/Makefile
 	cp $(PLATFORMSRC)/linux.config $(LINUXDIR)/.config
 
 $(BUSYBOX): $(BUSYBOXDIR)/.config

@@ -1,0 +1,54 @@
+vanityhash, a hex hash fragment creation tool
+By Ryan Finnie <ryan@finnie.org>
+http://www.finnie.org/software/vanityhash/
+
+ABOUT
+
+vanityhash is a tool that can discover data to be added to the end of a 
+file to produce a desired hex hash fragment.  It searches a message 
+space and runs a hashing algorithm against the original data plus the 
+appended data to determine if the desired hash fragment is present.  
+vanityhash can run multiple parallel workers to effectively make use of 
+multiple processors/cores/threads, and supports multiple hash digest 
+types (MD5, SHA1, SHA256, etc).
+
+INSTALLATION
+
+vanityhash effectively requires Perl 5.8.0 or newer.  Specifically, 
+vanityhash will work with Perl 5.6.0 or later, but requires Digest:: 
+modules that implement the clone() function, which was not available at 
+the time of the Perl 5.6 series.  As of Perl 5.8.0, Digest::MD5 was 
+distributed with the core Perl distribution, and most other Digest:: 
+modules included clone().
+
+The only required module not included with standard Perl installations 
+is Digest.  This may be obtained from your distribution (for example, 
+libdigest-perl on Debian-based systems), or from CPAN. For SHA hashes 
+and certain MD hashes, additional Perl modules may be required.  
+Optional modules include:
+
+  Digest::MD2
+  Digest::MD4
+  Digest::SHA
+  Digest::SHA1
+  Digest::CRC
+
+At the time of this writing, Digest::CRC's clone() support appears to 
+be broken.
+
+To "build" and install vanityhash:
+
+  make
+  make test
+  make install
+  make clean
+
+/usr/local is the default Makefile prefix, use PREFIX to override.
+
+USAGE
+
+Please see the man page for full details.
+
+  vanityhash [options] hexfragment < inputfile
+
+  vanityhash --append [options] hexfragment < inputfile > outputfile

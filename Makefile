@@ -1,9 +1,13 @@
 -include .arcaderc
 ARCADE ?= /opt/arcade
 
-VANITY_HASH= --digest=sha1 --bits=32 10decade
+ISO2ZIP = $(ARCADE)/src/tools/iso2zip
+VANITY_HASH = $(ARCADE)/src/tools/vanityhash-1.1/vanityhash --append \
+				--workers=8 --digest=sha1 --bits=48 a4cade
+# --bits=48 10decade
 
 BUILDROOT_VER = 2013.08.1
+UCLIBC_VER=0.9.33.2
 LINUX_VER = 3.10.17
 BUSYBOX_VER = 1.21.1
 
@@ -17,19 +21,47 @@ BUILDROOTDIR = $(ARCADE)/build/buildroot-$(BUILDROOT_VER)
 all:
 
 setup: buildroot 
-	git clone git@github.com:century-arcade/src.git $(ARCADE)/src
-	git clone git@github.com:century-arcade/www.git $(ARCADE)/www
+
+setup-git: $(ARCADE)/src/Makefile $(ARCADE)/www/index.html
+
+$(ARCADE)/src/Makefile:
+	git clone https://github.com/century-arcade/src.git $(ARCADE)/src
+
+$(ARCADE)/www/index.html:
+	git clone https://github.com/century-arcade/www.git $(ARCADE)/www
 
 $(DOWNLOADS)/buildroot-$(BUILDROOT_VER).tar.bz2:
 	$(WGET) http://buildroot.uclibc.org/downloads/buildroot-$(BUILDROOT_VER).tar.bz2
 
-buildroot: $(DOWNLOADS)/buildroot-$(BUILDROOT_VER).tar.bz2
-	mkdir -p $(ARCADE)/build
-	mkdir -p $(ARCADE)/images
-	tar jx -C $(ARCADE)/build -f $<
+$(DOWNLOADS)/uclibc-$(UCLIBC_VER).tar.bz2:
+	$(WGET) http://www.uclibc.org/downloads/uClibc-$(UCLIBC_VER).tar.xz
+
+$(ARCADE)/src/buildroot.config: setup-git 
+
+$(BUILDROOTDIR)/.config: $(ARCADE)/src/buildroot.config $(BUILDROOTDIR)/Makefile
 	cp $(ARCADE)/src/buildroot.config $(BUILDROOTDIR)/.config
+
+$(BUILDROOTDIR)/Makefile: $(DOWNLOADS)/buildroot-$(BUILDROOT_VER).tar.bz2
+	mkdir -p $(ARCADE)/build
+	tar jx -C $(ARCADE)/build -f $<
+
+$(UCLIBCDIR)/Makefile: $(DOWNLOADS)/uclibc-$(UCLIBC_VER).tar.bz2
+	mkdir -p $(ARCADE)/build
+	tar jx -C $(ARCADE)/build -f $<
+
+$(UCLIBCDIR)/.config: $(PLATFORMSRC)/uclibc.config $(UCLIBCDIR)/Makefile
+	cp $(PLATFORMSRC)/uclibc.config $(UCLIBCDIR)/.config
+
+uclibc: $(UCLIBCDIR)/.config $(UCLIBCDIR)/Makefile
+	make -C uclibc all install
+
+save-uclibc:
+	cp $(UCLIBCDIR)/.config $(ARCADE)/src/uclibc.config
+
+buildroot: $(BUILDROOTDIR)/.config $(BUILDROOTDIR)/Makefile
+	mkdir -p $(ARCADE)/images
 	ARCADE=$(ARCADE) make -C $(BUILDROOTDIR)
-	cp $(BUILDROOTDIR)/isolinux.bin $(ARCADE)/images/
+	cp $(BUILDROOTDIR)/output/images/isolinux.bin $(ARCADE)/images/
 
 else
 
@@ -70,7 +102,7 @@ PLATFORMSRC = $(ARCADE)/src/$(PLATFORM)
 ifdef GAME
 ISOROOT = $(BUILDDIR)/$(GAME).isoroot
 
-all: $(GAME).iso
+all: $(GAME)-beta.iso  # $(GAME).iso.zip
 endif
 
 include $(ARCADE)/src/Makefile.$(PLATFORM)
@@ -91,7 +123,7 @@ $(LINUXDIR)/Makefile: $(DOWNLOADS)/linux-$(LINUX_VER).tar.xz
 	tar Jx -C $(BUILDDIR) -f $<
 	touch $(LINUXDIR)/Makefile
 
-$(BUSYBOXDIR)/.config: $(PLATFORMSRC)/busybox.config
+$(BUSYBOXDIR)/.config: $(PLATFORMSRC)/busybox.config $(BUSYBOXDIR)/Makefile
 	cp $(PLATFORMSRC)/busybox.config $(BUSYBOXDIR)/.config
 
 $(LINUXDIR)/.config: $(PLATFORMSRC)/linux.config $(LINUXDIR)/Makefile
@@ -123,7 +155,7 @@ initramfs: $(BUSYBOX)
 	mkdir -p $(INITRAMFS)/sys
 	mkdir -p $(INITRAMFS)/bin
 	mkdir -p $(INITRAMFS)/etc
-	cp $(PLATFORMSRC)/linuxrc $(INITRAMFS)/linuxrc
+	mkdir -p $(INITRAMFS)/cdrom
 
 clean-iso:
 	rm -rf $(ISOROOT)
@@ -137,8 +169,10 @@ iso-setup: clean-iso
 	cp $(ARCADE)/images/isolinux.bin $(ISOROOT)/boot/
 	cp $(ARCADE)/images/bzImage.$(PLATFORM) $(ISOROOT)/boot/bzImage
 	cp $(PLATFORMSRC)/isolinux.cfg $(ISOROOT)/boot/isolinux/
+	cp $(GAMESRC)/splash.lss $(ISOROOT)/boot/isolinux/
+	/bin/echo -ne "\x18splash.lss\x0a\x1a" > $(ISOROOT)/boot/isolinux/display.msg
 
-%.iso: %.isoroot $(PLATFORM)
+%-beta.iso: %.isoroot $(PLATFORM)
 	mkisofs -J -R \
 		-iso-level 1 \
 		-no-pad \
@@ -157,14 +191,25 @@ iso-setup: clean-iso
 		-boot-load-size 4 \
 		-boot-info-table \
 		-input-charset=iso8859-1 \
-		-o $@.prehash \
+		-o $@ \
 		$(ISOROOT)/
-
-%.iso.zip: %-prehash.iso
-	$(ARCADE)/src/tools/iso2zip $< -o $*-prehash.izo
-	$(ARCADE)/src/vanityhash --append --workers=8 $(VANITY_HASH) < $*-prehash.izo > $*.iso
-	zip $*.iso $*.iso.zip.prehash
-	$(ARCADE)/src/vanityhash --append --workers=8 $(VANITY_HASH) < $*.iso.zip.prehash > $*.iso.zip
+	truncate --size=%1M $@     # virtualbox needs size to multiple of 1MB
 
 endif
 
+%.iso.zip: %-beta.iso $(ISO2ZIP)
+	$(ISO2ZIP) $< -o $*-prehash.izo
+	$(VANITY_HASH) < $*-prehash.izo > $*.iso
+	zip $*.iso.zip.prehash $*.iso
+	$(VANITY_HASH) < $*.iso.zip.prehash > $*.iso.zip
+
+%.lss: %.ppm
+	ppmtolss16 < $< > $@
+
+# use system gcc
+$(ISO2ZIP): $(ARCADE)/src/tools/iso2zip.c
+	gcc -o $@ $<
+
+.PHONY: clean
+clean: $(PLATFORM)-clean
+	make -C $(ARCADE)/src/zmachine distclean

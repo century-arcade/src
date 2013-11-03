@@ -1,0 +1,14 @@
+vanityhash 1.1 (2010-12-11)
+  * vanityhash 1.0 mistakenly referred to itself as version 0.2.  
+    Fixed.
+  * Fixed POSIX::SIGINT() calls for compatibility with older versions 
+    of Perl.
+  * Added CRC digest support, though Digest::CRC's clone() support 
+    seems to be broken.
+  * README: Updated requirements text.
+  * Added "sha1alt" digest type, for using Digest::SHA1 instead of 
+    Digest::SHA.
+  * Makefile: Added additional checks in test target.
+
+vanityhash 1.0 (2010-12-11)
+  * Initial release

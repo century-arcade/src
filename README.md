@@ -8,17 +8,17 @@ Futureproof bootable ready-to-play ISOs of classic games
 1) Start with a Debian/Ubuntu install
 
 2) Install these packages
+
     apt-get install build-essential libgmp3-dev libmpfr-dev libmpc-dev texinfo libncurses5-dev unzip git-all
 
-3) Make the toplevel $ARCADE directory [default /opt/arcade]
-    make sure it has at least 10GB+ free
+3) Make the toplevel $ARCADE directory [default /opt/arcade].  Make sure it has at least 10GB+ free.
 
-4) Put this [Makefile](http://github.com/centuryarcade/src/Makefile) in the
-   root of $(ARCADE)
+4) wget -P $(ARCADE) https://raw.github.com/century-arcade/src/master/Makefile
 
 5) make -C $(ARCADE) setup
 
-    This will setup buildroot, build the toolchain, and clone the git repositories into src and www.  Note: This downloads ~200MB and uses 2.5GB of disk.
+    This will clone the src and www git repositories, setup buildroot, and
+    build the toolchain.  This downloads ~200MB and uses 2.5GB of disk.
 
 6) add $(ARCADE)/host/usr/bin/ to your PATH
 
@@ -32,4 +32,4 @@ Futureproof bootable ready-to-play ISOs of classic games
 
 === Notes ===
 
-* Makefile tries to include .arcaderc very first thing for default GAMESRC and PROJECT values for development purposes (so a bare 'make' actually does something reasonable).
+Makefile tries to include .arcaderc very first thing for default GAMESRC and PROJECT values for development purposes (so a bare 'make' actually does something reasonable).

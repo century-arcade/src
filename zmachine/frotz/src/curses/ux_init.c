@@ -143,9 +143,12 @@ void os_process_arguments (int argc, char *argv[])
     char *p = NULL;
     char *blorb_ext = NULL;
 
+#ifndef ARCADE
     char *home;
+#endif
     char configfile[FILENAME_MAX + 1];
 
+#ifndef ARCADE
 #ifndef WIN32
     if ((getuid() == 0) || (geteuid() == 0)) {
         printf("I won't run as root!\n");
@@ -163,6 +166,7 @@ void os_process_arguments (int argc, char *argv[])
         printf("Hard drive on fire!\n");
         exit(1);
     }
+#endif // !ARCADE
 
 /*
  * It doesn't look like Frotz can reliably be resized given its current
@@ -186,11 +190,14 @@ void os_process_arguments (int argc, char *argv[])
     /* If not found, look for CONFIG_DIR/frotz.conf */
     /* $HOME/.frotzrc overrides CONFIG_DIR/frotz.conf */
 
+#ifndef ARCADE
     strncpy(configfile, home, FILENAME_MAX);
     strncat(configfile, "/", 1);
 
     strncat(configfile, USER_CONFIG, strlen(USER_CONFIG));
-    if (!getconfig(configfile)) {
+    if (!getconfig(configfile))
+#endif
+    {
 	strncpy(configfile, CONFIG_DIR, FILENAME_MAX);
 	strncat(configfile, "/", 1);	/* added by DJP */
 	strncat(configfile, MASTER_CONFIG, FILENAME_MAX-10);
@@ -252,6 +259,7 @@ void os_process_arguments (int argc, char *argv[])
 
     } while (c != EOF);
 
+  if (f_setup.story_file == NULL) {
     if (optind != argc - 1) {
 	printf("FROTZ V%s\t", VERSION);
 #ifdef OSS_SOUND
@@ -282,7 +290,8 @@ void os_process_arguments (int argc, char *argv[])
     /* Save the story file name */
 
     f_setup.story_file = strdup(argv[optind]);
-    f_setup.story_name = strdup(basename(argv[optind]));
+  }
+    f_setup.story_name = strdup(basename(f_setup.story_file));
 
     /* Now strip off the extension. */
     p = rindex(f_setup.story_name, '.');
@@ -308,7 +317,7 @@ void os_process_arguments (int argc, char *argv[])
         }
     }
 
-    f_setup.story_path = strdup(dirname(argv[optind]));
+    f_setup.story_path = dirname(strdup(f_setup.story_file));
 
     /* Create nice default file names */
 
@@ -808,6 +817,10 @@ int getconfig(char *configfile)
 		else if (strcmp(varname, "zcode_path") == 0) {
 			f_setup.zcode_path = malloc(strlen(value) * sizeof(char) + 1);
 			strncpy(f_setup.zcode_path, value, strlen(value) * sizeof(char));
+		}
+		else if (strcmp(varname, "story_file") == 0) {
+			f_setup.story_file = malloc(strlen(value) * sizeof(char) + 1);
+			strncpy(f_setup.story_file, value, strlen(value) * sizeof(char));
 		}
 
 		/* The big nasty if-else thingy is finished */

@@ -1,7 +1,7 @@
 # Define your C compiler.  I recommend gcc if you have it.
 # MacOS users should use "cc" even though it's really "gcc".
 #
-CC = gcc
+CC ?= gcc
 #CC = cc
 
 # Define your optimization flags.  Most compilers understand -O and -O2,
@@ -19,12 +19,9 @@ PREFIX = /usr/local
 MAN_PREFIX = $(PREFIX)
 #MAN_PREFIX = /usr/local/share
 
-CONFIG_DIR = $(PREFIX)/etc
-#CONFIG_DIR = /etc
-
 # Define where you want Frotz to look for frotz.conf.
 #
-CONFIG_DIR = /usr/local/etc
+CONFIG_DIR = /cdrom
 #CONFIG_DIR = /etc
 #CONFIG_DIR = /usr/pkg/etc
 #CONFIG_DIR =
@@ -195,7 +192,7 @@ FLAGS = $(OPTS) $(CURSES_DEFS) $(INCL)
 $(NAME): $(NAME)-curses
 curses:  $(NAME)-curses
 $(NAME)-curses: $(COMMON_TARGET) $(CURSES_TARGET) $(BLORB_TARGET)
-	$(CC) -o $(BINNAME)$(EXTENSION) $(TARGETS) $(LIB) $(CURSES) $(SOUND_LIB)
+	$(CC) -static -o $(BINNAME)$(EXTENSION) $(TARGETS) $(LIB) $(CURSES) $(SOUND_LIB)
 
 dumb:		$(NAME)-dumb
 d$(NAME):	$(NAME)-dumb

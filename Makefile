@@ -36,7 +36,7 @@ $(DOWNLOADS)/buildroot-$(BUILDROOT_VER).tar.bz2:
 $(DOWNLOADS)/uclibc-$(UCLIBC_VER).tar.bz2:
 	$(WGET) http://www.uclibc.org/downloads/uClibc-$(UCLIBC_VER).tar.xz
 
-$(ARCADE)/src/buildroot.config: setup-git 
+$(ARCADE)/src/buildroot.config: $(ARCADE)/src/Makefile
 
 $(BUILDROOTDIR)/.config: $(ARCADE)/src/buildroot.config $(BUILDROOTDIR)/Makefile
 	cp $(ARCADE)/src/buildroot.config $(BUILDROOTDIR)/.config

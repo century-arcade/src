@@ -1,0 +1,9 @@
+#!/bin/sh
+
+# Usage: checkpoint
+#     creates a tar archive in the file specified by /etc/checkpoint_device
+#     (populated by init)
+
+if [ -x /etc/checkpoint_device ] ; then
+    tar -C /save -cf `cat /etc/checkpoint_device`
+fi

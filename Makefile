@@ -102,7 +102,7 @@ PLATFORMSRC = $(ARCADE)/src/$(PLATFORM)
 ifdef GAME
 ISOROOT = $(BUILDDIR)/$(GAME).isoroot
 
-all: $(GAME)-beta.iso  # $(GAME).iso.zip
+all: $(GAME)-$(VERSION).iso  # $(GAME).iso.zip
 endif
 
 include $(ARCADE)/src/Makefile.$(PLATFORM)
@@ -130,9 +130,10 @@ $(LINUXDIR)/.config: $(PLATFORMSRC)/linux.config $(LINUXDIR)/Makefile
 	cp $(PLATFORMSRC)/linux.config $(LINUXDIR)/.config
 
 $(BUSYBOX): $(BUSYBOXDIR)/.config
-	ARCADE=$(ARCADE) make -C $(BUSYBOXDIR) all
+	ARCADE=$(ARCADE) INITRAMFS=$(INITRAMFS) make -C $(BUSYBOXDIR) all
 
 $(KERNEL): $(LINUXDIR)/.config initramfs-setup
+	make -C $(LINUXDIR) modules_install INSTALL_MOD_PATH=${INITRAMFS}
 	make -C $(LINUXDIR) all
 
 kernel-image: $(KERNEL)
@@ -155,7 +156,9 @@ initramfs: $(BUSYBOX)
 	mkdir -p $(INITRAMFS)/sys
 	mkdir -p $(INITRAMFS)/bin
 	mkdir -p $(INITRAMFS)/etc
+	mkdir -p $(INITRAMFS)/tmp
 	mkdir -p $(INITRAMFS)/cdrom
+	mkdir -p $(INITRAMFS)/save
 
 clean-iso:
 	rm -rf $(ISOROOT)
@@ -172,7 +175,7 @@ iso-setup: clean-iso
 	cp $(GAMESRC)/splash.lss $(ISOROOT)/boot/isolinux/
 	/bin/echo -ne "\x18splash.lss\x0a\x1a" > $(ISOROOT)/boot/isolinux/display.msg
 
-%-beta.iso: %.isoroot $(PLATFORM)
+%-$(VERSION).iso: %.isoroot $(PLATFORM)
 	mkisofs -J -R \
 		-iso-level 1 \
 		-no-pad \
@@ -193,18 +196,18 @@ iso-setup: clean-iso
 		-input-charset=iso8859-1 \
 		-o $@ \
 		$(ISOROOT)/
-	truncate --size=%1M $@     # virtualbox needs size to multiple of 1MB
+	truncate --size=%1M $@     # virtualbox needs size to be multiple of 2^20
 
 endif
 
-%.iso.zip: %-beta.iso $(ISO2ZIP)
+%.iso.zip: %-$(VERSION).iso $(ISO2ZIP)
 	$(ISO2ZIP) $< -o $*-prehash.izo
 	$(VANITY_HASH) < $*-prehash.izo > $*.iso
 	zip $*.iso.zip.prehash $*.iso
 	$(VANITY_HASH) < $*.iso.zip.prehash > $*.iso.zip
 
-%.lss: %.ppm
-	ppmtolss16 < $< > $@
+%.lss: %.jpg
+	$(ARCADE)/src/tools/mksplash.sh $< $@
 
 # use system gcc
 $(ISO2ZIP): $(ARCADE)/src/tools/iso2zip.c

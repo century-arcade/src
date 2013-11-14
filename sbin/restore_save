@@ -1,0 +1,26 @@
+#!/bin/sh
+
+# restore 'saved' files from tarfile attached as hard disk to /save
+
+# called from our init
+
+mkdir -p /save
+if tar -C /save -xf /dev/hda
+then
+    # hard disk is already a valid tar file, so reasonable safe to continue
+    #   to use it like that
+    echo "/dev/hda" > /etc/checkpoint_device
+else
+    # detect if it's uninitialized and therefore still usable by checkpoint
+    cat > /tmp/hdazeroes.golden <<- EOF
+    0000000 0000 0000 0000 0000 0000 0000 0000 0000
+    *
+    0001000
+EOF
+    if hexdump -n 4096 /dev/hda | diff /tmp/hdazeroes.golden -
+    then
+        # empty disk is also fine to use as a tar file
+        echo "/dev/hda" > /etc/checkpoint_device
+    fi
+fi
+

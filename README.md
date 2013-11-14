@@ -1,6 +1,6 @@
 # The Century Arcade
 
-Futureproof bootable ready-to-play ISOs of classic games
+A kit for making bootable ready-to-play ISOs of classic games
 
 ## To setup a build machine
 
@@ -29,10 +29,9 @@ Futureproof bootable ready-to-play ISOs of classic games
 ## To build the ISO for a game
 
 1. Download the game source package (like [LostPig-source.zip]())
-   put the .zip in $ARCADE/games/
+   unzip into a folder like $ARCADE/games/GameFolder.src
 
-2. Run ./buildiso.sh $ARCADE/games/LostPig-source.zip
-   will create the .iso in current directory
+2. make GAMESRC=$ARCADE/games/GameFolder.src
 
 ## Notes
 

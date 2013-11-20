@@ -45,7 +45,7 @@ main(int argc, char *const argv[])
             break;
 
         default: /* '?' */
-            fprintf(stderr, "Usage: %s [-t nsecs] [-n] name\n",
+            fprintf(stderr, "Usage: %s [-p <hex_prefix>] [-w <num-workers>] filename\n",
                     argv[0]);
             exit(EXIT_FAILURE);
         };

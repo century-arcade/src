@@ -155,7 +155,7 @@ main(int argc, char *const argv[])
     junk = (tv_start.tv_sec << 32) | tv_start.tv_usec;
 
     // give each worker its own 56-bit segment of the space.
-    junk &= 0xff00000000000000ULL;
+    junk &= 0x00FFFFFFFFFFFFFFULL;
     junk |= ((uint64_t) w) << 56;
 
     unsigned long long num_tried = 0;

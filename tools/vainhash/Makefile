@@ -4,7 +4,7 @@ vainhash: vainhash.o sha1.o
 
 test: vainhash
 	cp test.orig testfile
-	time ./vainhash testfile
+	time ./vainhash -p decade -w 1 testfile
 
 clean:
 	rm -f *.o vainhash

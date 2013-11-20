@@ -6,6 +6,7 @@
 #include <stdio.h> // fprintf
 #include <stdlib.h> // exit
 #include <fcntl.h> // O_RDWR
+#include <getopt.h>
 
 #include "sha1.h"
 
@@ -22,20 +23,40 @@ static void hex_print(unsigned char *output, size_t n)
 }
 
 int
-main(int argc, const char **argv)
+main(int argc, char *const argv[])
 {
-    unsigned char vanitysegment[4] = { 0xde, 0xca, 0xde };
-    size_t vanitysize = 3;
+    int opt;
+    uint64_t vanityvalue = 0;
+    size_t vanitysize = 2;
+    int nworkers = 1;
 
-    // getopt
+    while ((opt = getopt(argc, argv, "p:w:")) != -1) {
+        switch (opt) {
+        case 'p': // hash prefix in hex
+        {
+            char *endptr = NULL;
+            vanityvalue = strtoull(optarg, &endptr, 16);
+            vanitysize = (endptr - optarg) / 2;
+            break;
+        }
 
-    sha1_context *ctx = (sha1_context *) malloc(sizeof(sha1_context));
-    sha1_starts(ctx);
+        case 'w': // num workers
+            nworkers = atoi(optarg);
+            break;
+
+        default: /* '?' */
+            fprintf(stderr, "Usage: %s [-t nsecs] [-n] name\n",
+                    argv[0]);
+            exit(EXIT_FAILURE);
+        };
+    };
+
+    const char *fn = argv[optind];
 
     struct stat st;
-    int fd = open(argv[1], O_RDWR | O_EXCL);
+    int fd = open(fn, O_RDWR | O_EXCL);
     if (fd < 0) {
-        perror(argv[1]);
+        perror(fn);
         exit(EXIT_FAILURE);
     }
 
@@ -43,6 +64,9 @@ main(int argc, const char **argv)
         perror("fstat");
         exit(EXIT_FAILURE);
     }
+
+    sha1_context *ctx = (sha1_context *) malloc(sizeof(sha1_context));
+    sha1_starts(ctx);
 
     size_t bytes_left = st.st_size - END_JUNK_SIZE;
     while (bytes_left > 0)
@@ -87,7 +111,7 @@ main(int argc, const char **argv)
     sha1_update(ctx, goldzero, END_JUNK_SIZE);
     sha1_finish(ctx, hash);
 
-    fprintf(stderr, "original SHA1 of %s: ", argv[1]);
+    fprintf(stderr, "original SHA1 of %s: ", fn);
     hex_print(hash, 20);
 
     while (1) {
@@ -99,7 +123,7 @@ main(int argc, const char **argv)
         sha1_finish(ctx, hash);
 
         // if the hash begins with the vanity bytes, update the file and quit
-        if (memcmp(hash, vanitysegment, vanitysize) == 0) {
+        if (memcmp(hash, &vanityvalue, vanitysize) == 0) {
             fprintf(stderr, "\nwriting junk for vanity hash: ");
             hex_print(junk, END_JUNK_SIZE);
 

@@ -28,8 +28,7 @@ A kit for making bootable ready-to-play ISOs of classic games
 
 ## To build the ISO for a game
 
-1. Download the game source package (like [LostPig-source.zip]())
-   unzip into a folder like $ARCADE/games/GameFolder.src
+1. Download the game source package (like [LostPig-source.zip]()) and unzip into a folder like $ARCADE/games/GameFolder.src
 
 2. make GAMESRC=$ARCADE/games/GameFolder.src
 

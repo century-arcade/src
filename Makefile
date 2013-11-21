@@ -2,9 +2,8 @@
 ARCADE ?= /opt/arcade
 
 ISO2ZIP = $(ARCADE)/src/tools/iso2zip
-VANITY_HASH = $(ARCADE)/src/tools/vanityhash-1.1/vanityhash --append \
-				--workers=8 --digest=sha1 --bits=48 a4cade
-# --bits=48 10decade
+VANITY_HASHER = $(ARCADE)/src/tools/vainhash/vainhash
+VANITY_OPTS = -w 8 -p face
 
 BUILDROOT_VER = 2013.08.1
 UCLIBC_VER=0.9.33.2
@@ -80,10 +79,10 @@ PREP ?=                  PREPARER_ID
 SYSI ?= Linux          # SYSTEM_ID
 VOLI ?=                  VOLUME_ID
 VOLS ?=                  VOLUMESET_ID
-ABST ?= README         # ABSTRACT_FILE
+ABST ?= README.TXT     # ABSTRACT_FILE
 APPI ?= Linux          # APPLICATION_ID
-COPY ?= README         # COPYRIGHT_FILE
-BIBL ?= README         # BIBLIOGRAPHIC_FILE
+COPY ?= README.TXT     # COPYRIGHT_FILE
+BIBL ?= README.TXT     # BIBLIOGRAPHIC_FILE
 
 endif
 
@@ -102,7 +101,7 @@ PLATFORMSRC = $(ARCADE)/src/$(PLATFORM)
 ifdef GAME
 ISOROOT = $(BUILDDIR)/$(GAME).isoroot
 
-all: $(GAME)-$(VERSION).iso  # $(GAME).iso.zip
+all: $(GAME)-$(VERSION).iso.zip
 endif
 
 include $(ARCADE)/src/Makefile.$(PLATFORM)
@@ -175,7 +174,7 @@ iso-setup: clean-iso
 	cp $(GAMESRC)/splash.lss $(ISOROOT)/boot/isolinux/
 	/bin/echo -ne "\x18splash.lss\x0a\x1a" > $(ISOROOT)/boot/isolinux/display.msg
 
-%-$(VERSION).iso: %.isoroot $(PLATFORM)
+%-$(VERSION).iso.zip: %.isoroot $(PLATFORM) $(ISO2ZIP) vanityhasher
 	mkisofs -J -R \
 		-iso-level 1 \
 		-no-pad \
@@ -194,17 +193,14 @@ iso-setup: clean-iso
 		-boot-load-size 4 \
 		-boot-info-table \
 		-input-charset=iso8859-1 \
-		-o $@ \
+		-o $@.1 \
 		$(ISOROOT)/
-	truncate --size=%1M $@     # virtualbox needs size to be multiple of 2^20
-
-endif
-
-%.iso.zip: %-$(VERSION).iso $(ISO2ZIP)
-	$(ISO2ZIP) $< -o $*-prehash.izo
-	$(VANITY_HASH) < $*-prehash.izo > $*.iso
-	zip $*.iso.zip.prehash $*.iso
-	$(VANITY_HASH) < $*.iso.zip.prehash > $*.iso.zip
+	$(ISO2ZIP) $@.1 -o $*-$(VERSION).iso
+	$(VANITY_HASHER) $(VANITY_OPTS) $*-$(VERSION).iso
+	zip $@ $*-$(VERSION).iso
+	truncate --size=+8 $@
+	$(VANITY_HASHER) $(VANITY_OPTS) $@
+endif # PLATFORM
 
 %.lss: %.jpg
 	$(ARCADE)/src/tools/mksplash.sh $< $@
@@ -213,6 +209,9 @@ endif
 $(ISO2ZIP): $(ARCADE)/src/tools/iso2zip.c
 	gcc -o $@ $<
 
+vanityhasher:
+	$(MAKE) -C $(ARCADE)/src/tools/vainhash
+
 .PHONY: clean
 clean: $(PLATFORM)-clean
-	make -C $(ARCADE)/src/zmachine distclean
+

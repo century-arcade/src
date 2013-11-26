@@ -1,7 +1,7 @@
 -include .arcaderc
 ARCADE ?= /opt/arcade
 
-ISO2ZIP = $(ARCADE)/src/tools/iso2zip
+MKIZO = $(ARCADE)/src/tools/mkizo
 VANITY_HASHER = $(ARCADE)/src/tools/vainhash/vainhash
 VANITY_OPTS = -w 8 -p face
 
@@ -174,7 +174,7 @@ iso-setup: clean-iso
 	cp $(GAMESRC)/splash.lss $(ISOROOT)/boot/isolinux/
 	/bin/echo -ne "\x18splash.lss\x0a\x1a" > $(ISOROOT)/boot/isolinux/display.msg
 
-%-$(VERSION).iso.zip: %.isoroot $(PLATFORM) $(ISO2ZIP) vanityhasher
+%.iso: %.isoroot $(PLATFORM)
 	mkisofs -J -R \
 		-iso-level 1 \
 		-no-pad \
@@ -193,21 +193,25 @@ iso-setup: clean-iso
 		-boot-load-size 4 \
 		-boot-info-table \
 		-input-charset=iso8859-1 \
-		-o $@.1 \
+		-o $*.iso \
 		$(ISOROOT)/
-	$(ISO2ZIP) $@.1 -o $*-$(VERSION).iso
-	$(VANITY_HASHER) $(VANITY_OPTS) $*-$(VERSION).iso
-	zip $@ $*-$(VERSION).iso
+
+%-$(VERSION).iso: %.iso izomaker
+	$(MKIZO) $< -o $@
+
+%-$(VERSION).iso.zip: %-$(VERSION).iso vanityhasher
+	$(VANITY_HASHER) $(VANITY_OPTS) $<
+	zip $@ $<
 	truncate --size=+8 $@
 	$(VANITY_HASHER) $(VANITY_OPTS) $@
+
 endif # PLATFORM
 
 %.lss: %.jpg
 	$(ARCADE)/src/tools/mksplash.sh $< $@
 
-# use system gcc
-$(ISO2ZIP): $(ARCADE)/src/tools/iso2zip.c
-	gcc -o $@ $<
+izomaker:
+	$(MAKE) -C $(ARCADE)/src/tools/mkizo
 
 vanityhasher:
 	$(MAKE) -C $(ARCADE)/src/tools/vainhash

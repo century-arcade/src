@@ -43,6 +43,18 @@ struct DirectoryRecord
 
 } __attribute__ ((packed));
 
+enum iso_flag_enum_s {
+    ISO_FILE            =   0,   
+    ISO_EXISTENCE       =   1,   
+    ISO_DIRECTORY       =   2,   
+    ISO_ASSOCIATED      =   4,   
+    ISO_RECORD          =   8,   
+    ISO_PROTECTION      =  16,   
+    ISO_DRESERVED1      =  32,   
+    ISO_DRESERVED2      =  64,   
+    ISO_MULTIEXTENT     = 128,   
+} iso_flag_enums;
+
 typedef struct DirectoryRecord DirectoryRecord;
 
 typedef struct PrimaryVolumeDescriptor {

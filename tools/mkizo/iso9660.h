@@ -44,15 +44,14 @@ struct DirectoryRecord
 } __attribute__ ((packed));
 
 enum iso_flag_enum_s {
-    ISO_FILE            =   0,   
-    ISO_EXISTENCE       =   1,   
-    ISO_DIRECTORY       =   2,   
-    ISO_ASSOCIATED      =   4,   
-    ISO_RECORD          =   8,   
-    ISO_PROTECTION      =  16,   
-    ISO_DRESERVED1      =  32,   
-    ISO_DRESERVED2      =  64,   
-    ISO_MULTIEXTENT     = 128,   
+    ISO_HIDDEN          =   1,
+    ISO_DIRECTORY       =   2,
+    ISO_ASSOCIATED      =   4,
+    ISO_RECORD          =   8,
+    ISO_PROTECTION      =  16,
+    ISO_DRESERVED1      =  32,
+    ISO_DRESERVED2      =  64,
+    ISO_MULTIEXTENT     = 128,
 } iso_flag_enums;
 
 typedef struct DirectoryRecord DirectoryRecord;
@@ -73,14 +72,19 @@ typedef struct PrimaryVolumeDescriptor {
 	u16  volume_sequence_number;
 	u16  msb_volume_sequence_number;
 	u16  logical_block_size;
-	u16  logical_block_size_msb;
+	u16  msb_logical_block_size;
 	u32  path_table_size;
 	u32  msb_path_table_size;
+
+    // lsb_ are named explicitly because the lsb/msb are not the same value
+    //    and have to be allocated/set separately
 	u32  lsb_path_table_sector;
 	u32  lsb_alt_path_table_sector;
 	u32  msb_path_table_sector;
 	u32  msb_alt_path_table_sector;
+
     DirectoryRecord root_directory_record;
+    u8   root_id; // must be 0x00
     char volume_set_id[128];
     char publisher_id[128];
     char preparer_id[128];
@@ -88,15 +92,27 @@ typedef struct PrimaryVolumeDescriptor {
 	char copyright_file_id[37];
 	char abstract_file_id[37];
 	char bibliographical_file_id[37];
+
     DecimalDateTime creation_date;
     DecimalDateTime modification_date;
     DecimalDateTime expiration_date;
     DecimalDateTime effective_date;
+
     u8 file_structure_version;
 	u8 __unused4;
 	u8 application_data[512];
 	u8 __unused5;
 } PrimaryVolumeDescriptor;
+
+enum  {
+    VDTYPE_BOOT = 0,
+    VDTYPE_PRIMARY = 1,
+    VDTYPE_SUPP = 2,
+    VDTYPE_PARTITION = 3,
+    VDTYPE_END = 255,
+};
+
+const int SECTOR_SIZE = 2048;
 
 typedef struct PathTableEntry {
     u8 id_len;

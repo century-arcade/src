@@ -104,6 +104,16 @@ typedef struct PrimaryVolumeDescriptor {
 	u8 __unused5;
 } PrimaryVolumeDescriptor;
 
+#ifdef UNNEEDED // VDST always has the same contents
+typedef struct {
+    u8 type;    // 0xff
+    char id[5]; // 'CD001'
+    u8 version; // 0x01
+} VolumeDescriptorSetTerminator;
+#endif
+
+const u8 VolumeDescriptorSetTerminator[] = "\xff" "CD001" "\x01";
+
 enum  {
     VDTYPE_BOOT = 0,
     VDTYPE_PRIMARY = 1,

@@ -1,15 +1,13 @@
 
 CFLAGS=-ggdb
 
-test: genizo
+test: mkizo
 	./genizo test.izo
+	isovfy test.izo
+	isoinfo -i test.izo -d -debug -f
 
-
-genizo: iso9660.o
-	gcc -o $@ $^
-
-mkizo: mkizo.o iso9660.o
+mkizo: mkizo.o zip_crc32.o
 	gcc -o $@ $^
 
 clean:
-	rm -f test.izo genizo mkizo *.o
+	rm -f test.izo mkizo *.o

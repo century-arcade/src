@@ -1,500 +1,342 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <time.h>
 #include <stdio.h>
 #include <string.h>
 
+#include <sys/mman.h> // mmap
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <fcntl.h>    // O_RDONLY
 #include <unistd.h>
 
-#include <fcntl.h>
-#include <sys/mman.h>
-
 #include "iso9660.h"
+#include "ziphdr.h"
 
-#include "zip_crc32.c"
+FILE *fpizo = NULL;
 
-#define SECTOR_SIZE 2048
-#define PACKED __attribute__ ((__packed__))
+size_t nrootfiles = 1;  // root[0] is rootdir itself
+DirectoryRecord *root[32];
+size_t rootsize = 2*sizeof(DirectoryRecord) + 2; // . and ..
 
-#define LOG(FMT, args...) fprintf(stderr, FMT, ##args)
+// include 8 byte 'comment' for vanityhashing
+#define IZO_END_RESERVE 8
+size_t zip_cdir_len = sizeof(ZipEndCentralDirRecord) + IZO_END_RESERVE;
+size_t nzipfiles = 0;   // number of files in zip
+ZipCentralDirFileHeader *ziphdrs[32];
 
 static const int MB = 1024 * 1024;
+#define MAX_ID_LEN 31
 
-typedef uint32_t u32;
-typedef uint16_t u16;
-typedef uint8_t u8;
-
-typedef struct PACKED {
-    u32 signature;
-    u16 version_needed;
-    u16 bit_flags;
-    u16 method;
-    u16 time;
-    u16 date;
-    u32 crc32;
-    u32 comp_size;
-    u32 uncomp_size;
-    u16 filename_len;
-    u16 extra_len;
-    char filename[];
-//    char m_extra[];
-} ZipLocalFileHeader;
-
-typedef struct PACKED {
-    u32 signature;
-    u16 version_made_by;
-    u16 version_needed;
-    u16 bit_flags;
-    u16 method;
-    u16 date;
-    u16 time;
-    u32 crc32;
-    u32 comp_size;
-    u32 uncomp_size;
-    u16 filename_len;
-    u16 extra_len;
-    u16 comment_len;
-    u16 disknum_start;
-    u16 internal_attr;
-    u32 external_attr;
-    u32 local_header_ofs;
-    char filename[];
-//    char m_extra[];
-//    char m_comment[];
-} ZipCentralDirFileHeader;
-
-typedef struct PACKED {
-    u32 signature;
-    u16 disk_num;
-    u16 disk_start;
-    u16 disk_num_records;
-    u16 total_num_records;
-    u32 central_dir_bytes;
-    u32 central_dir_start;  // relative to start of archive
-    u16 comment_len;
-    u8 comment[];
-} ZipEndCentralDirRecord;
-
-#define SECTOR(N) (isoptr + (N) * SECTOR_SIZE)
-
-
-static
-const DirectoryRecord *find_file_at_sector_helper(void *isoptr,
-                                                  int sector_num,
-                                                  const DirectoryRecord *dir)
+int g_num_sectors = 16; // after SystemArea
+int alloc_sectors(size_t n)
 {
-    const DirectoryRecord *entry = SECTOR(dir->data_sector);
-    for (; entry->record_len != 0; entry = NEXT_DIR_ENTRY(entry))
-    {
-        if (entry->flags & ISO_DIRECTORY)
-        {
-            if (entry->id[0] == 0 || entry->id[0] == 1) { // self or parent
-                continue;
-            }
+    int r = g_num_sectors;
+    g_num_sectors += n;
+    return r;
+}
 
-            const DirectoryRecord *r = find_file_at_sector_helper(isoptr, sector_num, entry);
-            if (r != NULL) {
-                return r;
-            }
-        }
+#define SET16_LSBMSB(R, F, V)  \
+    do { uint16_t val = (V); (R).F = val; (R).msb_##F = htons(val); } while (0)
+#define SET32_LSBMSB(R, F, V)  \
+    do { uint32_t val = (V); (R).F = val; (R).msb_##F = htonl(val); } while (0)
 
-        int start = entry->data_sector;
-        int end = entry->data_sector + entry->data_len / SECTOR_SIZE;
-
-        if (entry->data_len % SECTOR_SIZE == 0)
-            end -= 1;
-
-        if (sector_num >= start && sector_num <= end)
-        {
-            return entry;
-        }
+// returns pointer to remainder of src, or to null byte if none
+const char *strncpypad(char *dest, const char *src, size_t destsize, char padch)
+{
+    while (destsize > 0 && *src) {
+        *dest++ = *src++;
+        destsize--;
     }
 
-    return NULL;
-}
-
-const DirectoryRecord *find_file_at_sector(void *isoptr, int sector_num)
-{
-    const PrimaryVolumeDescriptor *pvd = SECTOR(16);
-    const DirectoryRecord *rootrecord =  &pvd->root_directory_record;
-    return find_file_at_sector_helper(isoptr, sector_num, rootrecord);
-}
-
-// for local file header
-struct added_sector
-{
-    u8 data[SECTOR_SIZE];
-    int sector_lba; // inserted just before this LBA in the original ISO
-};
-
-void usage_and_exit(const char *binname) {
-    fprintf(stderr, "Usage: %s [-o <output-izo-name>] [-i <input-iso>] <files-to-include-in-zip>...\n", 
-            binname);
-    exit(EXIT_FAILURE);
-}
-
-typedef struct ISOFile {
-    const DirectoryRecord *entry;  // on ISO
-    char fn[256]; // null-terminated (entry->id isn't)
-    struct ISOFile *next; // simple linked list
-} ISOFile;
-
-ISOFile *get_files_in_dir(void *isoptr, int dirsector,
-                          ISOFile *head, const char *basepath)
-{
-    DirectoryRecord *entry = SECTOR(dirsector);
-    for ( ; entry->record_len > 0 ; entry = NEXT_DIR_ENTRY(entry))
-    {
-        if (entry->id[0] == 0x0) {
-            // current directory
-            continue;
-        } else if (entry->id[0] == 0x01) {
-            // parent directory
-            continue;
-        }
-
-        char fqpn[256] = { 0 };
-        strcpy(fqpn, basepath);
-        strncat(fqpn, entry->id, entry->id_len);
-
-        if (entry->flags & ISO_DIRECTORY) {
-            // recurse into directories
-            strcat(fqpn, "/");
-            head = get_files_in_dir(isoptr, entry->data_sector, head, fqpn);
-        } else {
-            ISOFile *f = (ISOFile *) malloc(sizeof(ISOFile));
-
-            // remove trailing ;1
-            *strrchr(fqpn, ';') = 0;
-
-            f->entry = entry;
-            strcpy(f->fn, fqpn);
-            f->next = head;
-            head = f;
-        }
+    while (destsize > 0) {
+        *dest++ = padch;
+        destsize--;
     }
-    return head;
+
+    return src;
 }
 
-static int
-create_zip_hdrs(void *isoptr, ISOFile *f,
-                ZipLocalFileHeader **out_lhdr, int *out_lhdr_len, 
-                ZipCentralDirFileHeader **out_chdr, int *out_chdr_len)
+void
+setdate(DecimalDateTime *ddt, const char *strdate)
 {
-    const DirectoryRecord *prev_file = find_file_at_sector(isoptr, f->entry->data_sector - 1);
-    if (prev_file == NULL) {
-        fprintf(stderr, "no previous file\n");
+    // dates must be like "2078123123595999+0800"
+    //      or truncated (remainder are filled with '0's)
+    // (Decimal Date Time verbatim + gmt_offset which is parsed)
+
+    const char *leftover = strncpypad((char *) ddt, strdate, sizeof(*ddt)-1, '0');
+    if (*leftover == '+' || *leftover == '-') {
+        ddt->gmt_offset = atoi(leftover);
+    } else {
+        ddt->gmt_offset = 0;
+    }
+}
+
+void izo_fill_dir_time(DirectoryRecord *dr, time_t t)
+{
+    if (t == 0) return;
+
+    struct tm tm;
+    gmtime_r(&t, &tm);
+    dr->years_since_1900 = tm.tm_year - 1900;
+    dr->month = tm.tm_mon + 1;
+    dr->day = tm.tm_mday + 1;
+    dr->hour = tm.tm_hour;
+    dr->minute = tm.tm_min;
+    dr->second = tm.tm_sec;
+//    dr->gmt_offset = 0; // XXX: possible to set the timezone from stat info?
+}
+
+#define FSEEK fseek
+#define STAT stat
+#define FWRITE(FP, PTR, LEN) \
+    if (fwrite(PTR, LEN, 1, FP) != 1) { perror("fwrite" #PTR); return -1; }
+
+#define FWRITEAT(FP, POS, PTR, LEN) do { \
+    FSEEK(FP, POS, SEEK_SET); \
+    FWRITE(FP, PTR, LEN); \
+} while (0)
+
+static inline int sectors(int nbytes)
+{
+    int nsectors = nbytes / SECTOR_SIZE;
+    if (nbytes % SECTOR_SIZE > 0) nsectors += 1;
+    return nsectors;
+}
+
+int mkfile(const char *localfn, const char *isofn)
+{
+    struct stat st;
+
+    STAT(localfn, &st);
+
+    int nsectors = sectors(st.st_size);
+    int sector = alloc_sectors(nsectors+1);
+
+    int fd = open(localfn, O_RDONLY);
+    if (fd < 0) {
+        perror(localfn);
         return -1;
-    }         
+    } 
+  
+    const char *contents =
+            mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 
-    int prev_filesize = prev_file->data_len;
-    int leftover = SECTOR_SIZE - (prev_filesize % SECTOR_SIZE);
+    // how hard to combine the copy and the crc?
+    uint32_t crc = crc32(contents, st.st_size);
 
-    if (leftover == SECTOR_SIZE) {
-        leftover = 0; 
+    FWRITEAT(fpizo, (sector+1) * SECTOR_SIZE, contents, st.st_size);
+
+    munmap((void *) contents, st.st_size);
+    close(fd);
+
+    size_t id_len = strlen(isofn);
+
+    DirectoryRecord *r = (DirectoryRecord *) malloc(sizeof(DirectoryRecord) + id_len);
+
+    int rlen=sizeof(DirectoryRecord) + id_len;
+    memset(r, 0, rlen);
+
+    // 6.8.1.1: "Each subsequent Directory Record recorded in that Logical
+    // Sector shall begin at the byte immediately following the last byte
+    // of the preceding Directory Record in that Logical Sector. Each
+    // Directory Record shall end in the Logical Sector in which it
+    // begins."
+    int bytes_left_in_sector = SECTOR_SIZE - (rootsize % SECTOR_SIZE);
+    if (sizeof(DirectoryRecord) + MAX_ID_LEN > bytes_left_in_sector) {
+        rlen += bytes_left_in_sector;
     }
 
-    size_t fnlen = strlen(f->fn);
-    size_t extralen = 0; // SECTOR_SIZE - (filesize % SECTOR_SIZE); // XXX: whole extra sector if mod == 0
-    size_t lhdrlen = sizeof(ZipLocalFileHeader) + fnlen + extralen;
-    ZipLocalFileHeader * lhdr = (ZipLocalFileHeader *) malloc(lhdrlen);
+    r->record_len = rlen;
 
-    lhdr->signature = 0x04034b50;
-    lhdr->version_needed = 0x00;
-    lhdr->bit_flags = 0x00;
-    lhdr->method = 0x00;
-    lhdr->time = 0x00;
-    lhdr->date = 0x00;
-    lhdr->crc32 = 0x00;
-    lhdr->comp_size = lhdr->uncomp_size = f->entry->data_len;
-    lhdr->filename_len = fnlen;
-    lhdr->extra_len = extralen;
-    strcpy(lhdr->filename, f->fn);
+    SET32_LSBMSB(*r, data_sector, sector);
+    SET32_LSBMSB(*r, data_len, st.st_size);
 
-    size_t chdrlen = sizeof(ZipCentralDirFileHeader) + fnlen;
+    // volume_seq_num/volume_set_size is always 1/1
+    SET16_LSBMSB(*r, volume_seq_num, 1);
+
+//    izo_fill_dir_time(sb.entry, time(NULL));
+
+    r->id_len = id_len;
+    strcpy(r->id, isofn);
+
+    size_t fidx = nrootfiles++;
+    root[fidx] = r;
+    rootsize += r->record_len;
+
+    // construct ZIP local and central dir headers
+
+    size_t chdrlen = sizeof(ZipCentralDirFileHeader) + id_len;
     ZipCentralDirFileHeader * chdr = (ZipCentralDirFileHeader *) malloc(chdrlen);
+    memset(chdr, 0, chdrlen);
+
+    size_t lhdrlen = sizeof(ZipLocalFileHeader) + id_len;
+    ZipLocalFileHeader * lhdr = (ZipLocalFileHeader *) alloca(lhdrlen);
+    memset(lhdr, 0, lhdrlen);
+
     chdr->signature = 0x02014b50;
-    chdr->version_made_by = 0x00;
-    chdr->version_needed = 0x00;
-    chdr->bit_flags = 0x00;
-    chdr->method = 0x00;
-    chdr->date = 0x00;
-    chdr->time = 0x00;
-    chdr->crc32 = 0x00;
-    chdr->comp_size = chdr->uncomp_size = f->entry->data_len;
-    chdr->filename_len = fnlen;
-    chdr->extra_len = extralen;
-    chdr->comment_len = 0;
-    chdr->disknum_start = 0;
-    chdr->internal_attr = 0x00;
-    chdr->external_attr = 0x00;
-    chdr->local_header_ofs = 0;
-    strcpy(chdr->filename, f->fn);
-//    char m_extra[];
-//    char m_comment[];
-
-    uint32_t crc = crc32(SECTOR(f->entry->data_sector), f->entry->data_len);
+    lhdr->signature = 0x04034b50;
+    chdr->date = lhdr->date = 0x00;
+    chdr->time = lhdr->time = 0x00;
     chdr->crc32 = lhdr->crc32 = crc;
+    chdr->comp_size = chdr->uncomp_size = 
+        lhdr->comp_size = lhdr->uncomp_size = st.st_size;
+    chdr->filename_len = lhdr->filename_len = id_len;
 
-    *out_lhdr = lhdr;
-    *out_lhdr_len = lhdrlen;
-    *out_chdr = chdr;
-    *out_chdr_len = chdrlen;
+    chdr->local_header_ofs = (sector + 1) * SECTOR_SIZE - lhdrlen;
+    strcpy(chdr->filename, isofn);
+    strcpy(lhdr->filename, isofn);
 
-    if (leftover >= lhdrlen) {
-        chdr->local_header_ofs = 
-                        f->entry->data_sector * SECTOR_SIZE - lhdrlen;
-        return 0;
-    }
-    
-    LOG("not enough leftover space in %s (size %d)\n", prev_file->id, prev_filesize);
-    return -1;
+    // write zip local header
+    FWRITEAT(fpizo, chdr->local_header_ofs, lhdr, lhdrlen);
+
+    // save off central dir header for later
+    ziphdrs[nzipfiles++] = chdr;
+    zip_cdir_len += chdrlen;
+
+    return 0;
 }
 
+DirectoryRecord * mkroot()
+{
+    size_t id_len = 1;
+
+    DirectoryRecord *r =
+        (DirectoryRecord *) malloc(sizeof(DirectoryRecord) + id_len);
+
+    // will also set id[0] to 0x0 if fn == NULL (as for root dir)
+    memset(r, 0, sizeof(DirectoryRecord) + id_len);
+
+    r->record_len = sizeof(DirectoryRecord) + id_len;
+
+    // volume_seq_num/volume_set_size is always 1/1
+    SET16_LSBMSB(*r, volume_seq_num, 1);
+//    izo_fill_dir_time(r, time(NULL));
+
+    r->flags |= ISO_DIRECTORY;
+    r->id_len = id_len;
+
+//    if (fn != NULL) { strcpy(r->id, fn); }
+
+    return r;
+}
+
+#define E(X) #X // TODO: getenv/config
+#define EINT(X) atoi(getenv(#X))
 
 int
-main(int argc, char **argv)
+fill_pvd(PrimaryVolumeDescriptor *pvd)
 {
-    assert(crc32("123456789", 9) == 0xcbf43926);
-    assert(sizeof(ZipLocalFileHeader) == 30);
-    assert(sizeof(ZipCentralDirFileHeader) == 46);
-    assert(sizeof(ZipEndCentralDirRecord) == 22);
+    memset(pvd, 0, sizeof(*pvd));
 
-    const char *infn = NULL;
-    char outfn[256] = { 0 };
+    pvd->type = VDTYPE_PRIMARY;
+    memcpy(pvd->id, "CD001", 5);
+    pvd->version = 0x01;
 
-    int errors = 0;
-    int fdiso, fdout;
+    strncpypad(pvd->system_id, E(system_id), 32, ' ');
+    strncpypad(pvd->volume_id, E(volume_id), 32, ' ');
 
-    int opt;
+    SET16_LSBMSB(*pvd, volume_set_size, 1);
+    SET16_LSBMSB(*pvd, volume_sequence_number, 1);
+    SET16_LSBMSB(*pvd, logical_block_size, 2048);
 
-    while ((opt = getopt(argc, argv, "i:o:")) != -1) {
-        switch (opt) {
-        case 'i': // input ISO
-            infn = strdup(optarg);
-            break;
-        case 'o':
-            strcpy(outfn, optarg);
-            break;
-        default:
-            usage_and_exit(argv[0]);
-        };
-    }
+    SET32_LSBMSB(*pvd, num_sectors, g_num_sectors);
 
-    if (optind > argc) {
-        usage_and_exit(argv[0]);
-    }
+    SET32_LSBMSB(*pvd, path_table_size, 0);
 
-    if (!outfn[0]) {
-        strcpy(outfn, infn);
-        char *ext = strrchr(outfn, '.');
-        *ext = 0;
-        strcat(ext, ".izo");
-    }
+    pvd->lsb_path_table_sector = 0;
+    pvd->msb_path_table_sector = 0;
+    pvd->lsb_alt_path_table_sector = 0;
+    pvd->msb_alt_path_table_sector = 0;
 
-    fprintf(stderr, "Converting ISO '%s' to IZO '%s'\n", infn, outfn);
+    strncpypad(pvd->volume_set_id, E(volume_set_id), 128, ' ');
+    strncpypad(pvd->publisher_id, E(publisher_id), 128, ' ');
+    strncpypad(pvd->preparer_id, E(preparer_id), 128, ' ');
+    strncpypad(pvd->application_id, E(application_id), 128, ' ');
+    strncpypad(pvd->copyright_file_id, E(copyright_file_id), 37, ' ');
+    strncpypad(pvd->abstract_file_id, E(abstract_file_id), 37, ' ');
+    strncpypad(pvd->bibliographical_file_id, E(bibliographical_file_id), 37, ' ');
 
-    if ((fdiso = open(infn, O_RDONLY)) < 0) {
-        perror(infn);
-        exit(EXIT_FAILURE);
-    }
+    setdate(&pvd->creation_date, E(creation_date));
+    setdate(&pvd->modification_date, E(modification_date));
+    setdate(&pvd->expiration_date, E(expiration_date));
+    setdate(&pvd->effective_date, E(effective_date));
 
-    struct stat st;
-    if (fstat(fdiso, &st) < 0) {
-        perror("fstat iso");
-        exit(EXIT_FAILURE);
-    }
-
-    unsigned long long isosize = st.st_size;
-
-    void *isoptr = mmap(NULL, isosize, PROT_READ | PROT_WRITE, MAP_PRIVATE, fdiso, 0);
-
-    if (isoptr == MAP_FAILED) {
-        perror("mmap");
-        exit(EXIT_FAILURE);
-    }
-
-    // get file info from ISO
-
-    PrimaryVolumeDescriptor *pvd = SECTOR(16);
-//    printf("# sectors=%d\n", pvd->num_sectors);
-    const DirectoryRecord *rootrecord =  &pvd->root_directory_record;
-    assert(rootrecord->record_len == sizeof(DirectoryRecord) + rootrecord->id_len);
-
-    ISOFile *files = get_files_in_dir(isoptr, rootrecord->data_sector, NULL, "");
-
-    ISOFile *f;
-    size_t num_files=0;
-    ZipCentralDirFileHeader *cdir_entries[256] = { NULL };
-    for (f = files; f != NULL; f = f->next)
-    {
-        LOG("%s at ISO sector %d (%u bytes)\n",
-            f->fn, f->entry->data_sector, f->entry->data_len);
-    }
-
-    for (f = files; f != NULL; f = f->next)
-    {
-        // if fn not in whitelist, skip
-        size_t ifn;
-        for (ifn=optind; ifn < argc; ++ifn) {
-            if (strcasecmp(argv[ifn], f->fn) == 0) // TODO: globmatch
-            {
-                LOG("including %s\n", f->fn);
-                ZipLocalFileHeader *local_hdr = NULL;
-                int localhdr_len = -1;
-                int centdirhdr_len = -1;
-    
-                if (create_zip_hdrs(isoptr, f,
-                                &local_hdr, &localhdr_len,
-                                &cdir_entries[num_files], &centdirhdr_len) < 0)
-                {
-                    errors++;
-                    continue;
-                }                        
-
-                // copy local header into mmap'ed iso (non-writeback)
-                void *iso_ziplhdr = SECTOR(f->entry->data_sector) - localhdr_len;
-                memcpy(iso_ziplhdr, local_hdr, localhdr_len);
-
-                num_files++;
-            }
-        }
-    }
-
-    if ((fdout = open(outfn, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR)) < 0) {
-        perror(outfn);
-        exit(EXIT_FAILURE);
-    }
-
-    // write out sectors from original ISO
-    int sector;
-    for (sector=0; sector * SECTOR_SIZE < isosize; ++sector)
-    {
-        ssize_t r;
-
-        r = write(fdout, isoptr + sector*SECTOR_SIZE, SECTOR_SIZE);
-        assert (r == SECTOR_SIZE);
-    }
-
-    // put together the .zip central directory in memory
-
-    char cdir_buf[32768];
-    int cdir_len = 0;
-
-    for (num_files=0; cdir_entries[num_files]; ++num_files)
-    {
-        size_t entry_len = sizeof(ZipCentralDirFileHeader) + cdir_entries[num_files]->filename_len;
-       
-        memcpy(&cdir_buf[cdir_len], cdir_entries[num_files], entry_len);
-        cdir_len += entry_len;
-    }
-
-    ZipEndCentralDirRecord *endcdir = (ZipEndCentralDirRecord *) cdir_buf;
-    endcdir->signature = 0x06054b50;
-    endcdir->disk_num = 0;
-    endcdir->disk_start = 0;
-    endcdir->central_dir_bytes = cdir_len;
-    endcdir->disk_num_records = endcdir->total_num_records = num_files;
-    endcdir->comment_len = 8;   // for vanity hashing
-
-    // make the IZO a multiple of 1MB
-    
-    cdir_len += sizeof(ZipEndCentralDirRecord) + 8;
-
-    unsigned long long newisosize = sector * SECTOR_SIZE;
-    newisosize += cdir_len + MB;
-    newisosize &= ~(MB-1);
-
-    endcdir->central_dir_start = newisosize - cdir_len;
-    assert(newisosize > isosize + cdir_len);  // plus
-    fprintf(stderr, "ISO size = %llu, new IZO size = %llu\n", isosize, newisosize);
-
-    if (ftruncate(fdout, newisosize) < 0) {
-        perror("ftruncate");
-        ++errors;
-    }
-
-    // and write out the .zip Central Directory Header
-
-    if (lseek(fdout, endcdir->central_dir_start, SEEK_SET) < 0) {
-        perror("lseek");
-        ++errors;
-    };
-
-    ssize_t r = write(fdout, cdir_buf, cdir_len);
-    assert(r == cdir_len);
-
-#if 0
-    struct added_sector *add_sectors[256] = { NULL };
-    int ninserts = 0;
-    int num_files = 0;
-
-    for (ISOFile *file = files; file->next != NULL; file = file->next)
-    {
-                
-    }
-
-    assert (isosize % SECTOR_SIZE == 0);
-
-#ifdef ADD_SECTORS
-    // for each inserted sector, bump the LBAs in directories and path tables.
-    int i;
-    for (i=0; add_sectors[i]; ++i)
-    {
-        // for each entry in the root directory,
-        //     bump LBA extent +1 in both LSB and MSB if >= as above
-
-        for (entry = SECTOR(rootrecord->data_sector);
-                entry->record_len > 0; entry = NEXT_DIR_ENTRY(entry))
-        {
-            if (entry->data_sector >= add_sectors[i]->sector_lba)
-            {
-                entry->data_sector += 1;
-                // XXX: also bump entry->msb_data_sector
-            }
-        }
-        
-        PathTableEntry *lsb_path_table = SECTOR(pvd->lsb_path_table_sector);
-        int j;
-        for (j=0; j < pvd->path_table_size; ++j) {
-            if (lsb_path_table[j].dir_sector >= add_sectors[i]->sector_lba) {
-                lsb_path_table[j].dir_sector += 1;
-            }
-            lsb_path_table = NEXT_PATH_TABLE_ENTRY(lsb_path_table);
-        }
-//     PathTableEntry *msb_path_table = SECTOR(ntohl(pvd->msb_path_table_sector));
-
-    }
-
-    pvd->num_sectors += ninserts;
-    // XXX: also msb_num_sectors;
-#endif // ADD_SECTORS
-
-#ifdef ADD_SECTORS
-        int i;
-        for (i=0; add_sectors[i]; ++i) {
-            if (add_sectors[i]->sector_lba == sector)
-            {
-                r = write(fdout, add_sectors[i]->data, SECTOR_SIZE);
-                fprintf(stderr, "inserted sector at %d\n", sector);
-                assert (r == SECTOR_SIZE);
-                break;
-            }
-        }            
-#endif
-
-    }
-
-#endif
-    munmap(isoptr, isosize);
-    close(fdiso);
-    close(fdout);
-
-    if (errors) {
-        fprintf(stderr, "WARNING: %d non-fatal errors\n", errors);
-    }
-
-    exit(0);
+    pvd->file_structure_version = 0x01;
 }
+
+int main(int argc, char **argv)
+{
+    const char *fn = argv[1];
+    unlink(fn);
+
+    fpizo = fopen(fn, "w+b");
+    int pvd_sector = alloc_sectors(1);   // Primary Volume Descriptor
+    assert(pvd_sector == 16);
+//    int br_sector = alloc_sectors(1);   // Boot Record
+    int vdst_sector = alloc_sectors(1); // Volume Descriptor Set Terminator
+
+    root[0] = mkroot();
+
+    mkfile("iso9660.h", "ISO9660.H");
+
+    // might need more than 1, but alloc_sectors won't be used after this
+    int rootsector = alloc_sectors(1);
+
+    root[0]->record_len = sizeof(DirectoryRecord) + 1;
+    SET32_LSBMSB(*root[0], data_sector, rootsector);
+    SET32_LSBMSB(*root[0], data_len, rootsize);
+
+    // write the PVD
+ 
+    PrimaryVolumeDescriptor pvd;
+    fill_pvd(&pvd);
+    memcpy(&pvd.root_directory_record, root[0], sizeof(DirectoryRecord));
+
+    FWRITEAT(fpizo, pvd_sector * SECTOR_SIZE, &pvd, sizeof(pvd));
+
+    FWRITEAT(fpizo, vdst_sector * SECTOR_SIZE, VolumeDescriptorSetTerminator, sizeof(VolumeDescriptorSetTerminator));
+
+    // write the root/. entry
+    FWRITEAT(fpizo, rootsector * SECTOR_SIZE, root[0], root[0]->record_len);
+
+    root[0]->id[0] = 0x01; // root/..
+
+    size_t r;
+    for (r=0; r < nrootfiles; ++r)
+    {
+        FWRITE(fpizo, root[r], root[r]->record_len);
+    }
+
+    long endpos = ftell(fpizo);
+    long bytes_left_this_mb = MB - (endpos % MB);
+    if (bytes_left_this_mb < zip_cdir_len) {
+        endpos += MB;
+    }
+    endpos += bytes_left_this_mb;
+
+    FSEEK(fpizo, endpos - zip_cdir_len, SEEK_SET);
+
+    for (r=0; r < nzipfiles; ++r)
+    {
+        FWRITE(fpizo, ziphdrs[r], sizeof(ZipCentralDirFileHeader) + ziphdrs[r]->filename_len);
+    }
+
+    ZipEndCentralDirRecord endcdir;
+    memset(&endcdir, 0, sizeof(endcdir));
+
+    endcdir.signature = 0x06054b50;
+    endcdir.central_dir_start = endpos - zip_cdir_len;
+    endcdir.central_dir_bytes = zip_cdir_len - sizeof(endcdir) - IZO_END_RESERVE;
+    endcdir.disk_num_records = endcdir.total_num_records = nzipfiles;
+    endcdir.comment_len = IZO_END_RESERVE;
+
+    char zerobuf[IZO_END_RESERVE] = { 0 };
+    FWRITE(fpizo, &endcdir, sizeof(endcdir));
+    FWRITE(fpizo, zerobuf, IZO_END_RESERVE);
+
+    fclose(fpizo);
+    return 0;
+}
+

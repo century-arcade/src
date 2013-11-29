@@ -2,7 +2,7 @@
 CFLAGS=-ggdb
 
 test: mkizo
-	./genizo test.izo
+	./mkizo -o test.izo .
 	isovfy test.izo
 	isoinfo -i test.izo -d -debug -f
 

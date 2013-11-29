@@ -1,20 +1,22 @@
 #include <assert.h>
+#include <unistd.h>
 #include <stdint.h>
 #include <stdlib.h>
-#include <time.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include <sys/mman.h> // mmap
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>    // O_RDONLY
-#include <unistd.h>
+#include <ftw.h>
 
 #include "iso9660.h"
 #include "ziphdr.h"
 
 FILE *fpizo = NULL;
+const char *sourcepath = NULL;
 
 size_t nrootfiles = 1;  // root[0] is rootdir itself
 DirectoryRecord *root[32];
@@ -131,7 +133,7 @@ int mkfile(const char *localfn, const char *isofn)
     munmap((void *) contents, st.st_size);
     close(fd);
 
-    size_t id_len = strlen(isofn);
+    size_t id_len = strlen(isofn) + 2; // include space for ';1'
 
     DirectoryRecord *r = (DirectoryRecord *) malloc(sizeof(DirectoryRecord) + id_len);
 
@@ -160,6 +162,8 @@ int mkfile(const char *localfn, const char *isofn)
 
     r->id_len = id_len;
     strcpy(r->id, isofn);
+    r->id[id_len-2] = ';';
+    r->id[id_len-1] = '1';
 
     size_t fidx = nrootfiles++;
     root[fidx] = r;
@@ -195,6 +199,21 @@ int mkfile(const char *localfn, const char *isofn)
     ziphdrs[nzipfiles++] = chdr;
     zip_cdir_len += chdrlen;
 
+    return 0;
+}
+
+int ftw_mkfile_helper(const char *fpath, const struct stat *sb, int typeflag)
+{
+    if (typeflag == FTW_F) {
+        // strip leading path
+        const char *isopath = &fpath[strlen(sourcepath)+1];
+        mkfile(fpath, isopath);
+    } else if (typeflag == FTW_D) {
+        // deal with directory
+    } else {
+        perror("ftw_mkfile_helper");
+        return -2;
+    }
     return 0;
 }
 
@@ -266,12 +285,43 @@ fill_pvd(PrimaryVolumeDescriptor *pvd)
     pvd->file_structure_version = 0x01;
 }
 
+void usage_and_exit(const char *binname) {
+    fprintf(stderr, "Usage: %s -o <output-izo-name> <path-to-walk>\n", 
+            binname);
+    exit(EXIT_FAILURE);
+}
+
 int main(int argc, char **argv)
 {
-    const char *fn = argv[1];
-    unlink(fn);
+    assert(crc32("123456789", 9) == 0xcbf43926);
+    assert(sizeof(ZipLocalFileHeader) == 30);
+    assert(sizeof(ZipCentralDirFileHeader) == 46);
+    assert(sizeof(ZipEndCentralDirRecord) == 22);
 
-    fpizo = fopen(fn, "w+b");
+    char *outfn = NULL;
+
+    int opt;
+
+    while ((opt = getopt(argc, argv, "o:")) != -1) {
+        switch (opt) {
+        case 'o':
+            outfn = strdup(optarg);
+            break;
+        default:
+            usage_and_exit(argv[0]);
+            break;
+        };
+    }
+
+    if (outfn == NULL || optind >= argc) {
+        usage_and_exit(argv[0]);
+    }
+
+    sourcepath = argv[optind];
+
+    unlink(outfn);
+
+    fpizo = fopen(outfn, "w+b");
     int pvd_sector = alloc_sectors(1);   // Primary Volume Descriptor
     assert(pvd_sector == 16);
 //    int br_sector = alloc_sectors(1);   // Boot Record
@@ -279,7 +329,10 @@ int main(int argc, char **argv)
 
     root[0] = mkroot();
 
-    mkfile("iso9660.h", "ISO9660.H");
+    if (ftw(sourcepath, ftw_mkfile_helper, 16) < 0) {
+        perror("ftw");
+        exit(-1);
+    }
 
     // might need more than 1, but alloc_sectors won't be used after this
     int rootsector = alloc_sectors(1);

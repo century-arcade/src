@@ -13,7 +13,7 @@
 
 static volatile int done = 0;
 
-static void child_exited(int signum)
+static void SIGCHLD_handler(int signum)
 {
     ++done;
 }
@@ -48,6 +48,8 @@ main(int argc, char *const argv[])
             char *endptr = NULL;
             uint64_t v = strtoull(optarg, &endptr, 16);
             vanitysize = (endptr - optarg) / 2;
+
+            // big-endian on all platforms
             int i;
             for (i=vanitysize; i > 0; --i) {
                 vanityvalue[i-1] = v & 0xff;
@@ -114,7 +116,7 @@ main(int argc, char *const argv[])
     }
 
     // save a copy of the context
-    // (to get SHA1 of original file, update with goldzero and finish)
+    // (to get SHA1 of original file, update with junk of 0 and finish)
  
     sha1_context *humblectx = (sha1_context *) malloc(sizeof(sha1_context));
     memcpy(humblectx, ctx, sizeof(sha1_context));
@@ -128,8 +130,10 @@ main(int argc, char *const argv[])
     fprintf(stderr, "original SHA1 of %s: ", fn);
     hex_print(hash, 20);
 
+    // child exit indicates success.  parent then rebroadcasts to all workers.
+    signal(SIGCHLD, SIGCHLD_handler);
+
     // spawn additional workers
-    signal(SIGCHLD, child_exited);
     pid_t children[1024] = { 0 };
     int w;
     for (w=1; w < num_workers; ++w) 
@@ -192,6 +196,7 @@ main(int argc, char *const argv[])
         ++num_tried;
         ++junk;
 
+        // trying to stagger worker status updates
         if ((junk & 0x00fffff) == (w << 19)) {
             struct timeval tv_now;
             gettimeofday(&tv_now, NULL);
@@ -202,15 +207,17 @@ main(int argc, char *const argv[])
                 elapsed_secs -= 1;
                 elapsed_usecs += 1000000;
             }
+
             // assume other workers are getting as many done as we are
             unsigned int rate = 0;
             
-            if (elapsed_secs > 0)
+            if (elapsed_secs > 0) {
                 rate = num_tried * num_workers / elapsed_secs;
+            }
 
             fprintf(stderr, "[worker %d] %llu in %ds; %u/s\r", w, num_tried, elapsed_secs, rate);
         }
-    }
+    } // end while
 
     if (w == num_workers) { // if we're the parent
         for (w=0; w < num_workers-1; ++w) {

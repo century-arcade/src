@@ -1,9 +1,9 @@
 -include .arcaderc
 ARCADE ?= /opt/arcade
 
-MKIZO = $(ARCADE)/src/tools/mkizo
+MKIZO = $(ARCADE)/src/tools/mkizo/mkizo
 VANITY_HASHER = $(ARCADE)/src/tools/vainhash/vainhash
-VANITY_OPTS = -w 8 -p face
+VANITY_OPTS = -w 8 -p dead
 
 BUILDROOT_VER = 2013.08.1
 UCLIBC_VER=0.9.33.2
@@ -174,36 +174,31 @@ iso-setup: clean-iso
 	cp $(GAMESRC)/splash.lss $(ISOROOT)/boot/isolinux/
 	/bin/echo -ne "\x18splash.lss\x0a\x1a" > $(ISOROOT)/boot/isolinux/display.msg
 
-%.iso: %.isoroot $(PLATFORM)
-	mkisofs -J -R \
-		-iso-level 1 \
-		-no-pad \
-		-biblio    "$(BIBL)" \
-		-copyright "$(COPY)" \
-		-A         "$(APPI)" \
-		-abstract  "$(ABST)" \
-		-p         "$(PREP)" \
-		-publisher "$(PUBL)" \
-		-sysid     "$(SYSI)" \
-		-V         "$(VOLI)" \
-		-volset    "$(VOLS)" \
-		-b boot/isolinux.bin \
-		-c boot/boot.cat \
-		-no-emul-boot \
-		-boot-load-size 4 \
-		-boot-info-table \
-		-input-charset=iso8859-1 \
-		-o $*.iso \
-		$(ISOROOT)/
+vaingold:
+	truncate --size=8 $@
 
-%-$(VERSION).iso: %.iso izomaker
-	$(MKIZO) $< -o $@
+%-$(VERSION).iso: %.isoroot $(PLATFORM) vaingold
+	system_id="$(SYSI)" \
+	volume_id="$(VOLI)" \
+	volume_set_id="$(VOLS)" \
+	publisher_id="$(PUBL)" \
+	preparer_id="$(PREP)" \
+	application_id="$(APPI)" \
+	copyright_file_id="$(COPY)" \
+	abstract_file_id="$(ABST)" \
+	bibliographical_file_id="$(BIBL)" \
+	creation_date='1900010000000000+0000' \
+	modification_date='1900010000000000+0000' \
+	expiration_date='1900010000000000+0000' \
+	effective_date='1900010000000000+0000' \
+		$(MKIZO) -c vaingold \
+		-o $@ \
+		$(ISOROOT)/
+#		-b boot/isolinux.bin \
 
 %-$(VERSION).iso.zip: %-$(VERSION).iso vanityhasher
 	$(VANITY_HASHER) $(VANITY_OPTS) $<
 	zip $@ $<
-	truncate --size=+8 $@
-	$(VANITY_HASHER) $(VANITY_OPTS) $@
 
 endif # PLATFORM
 

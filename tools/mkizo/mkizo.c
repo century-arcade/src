@@ -37,16 +37,14 @@ ISODir root;
 #define LOG(FMTSTR, args...) fprintf(stderr, FMTSTR "\n", ## args)
 #define VERBOSE(FMTSTR, args...) if (verbose) { LOG("%s: " FMTSTR, __FUNCTION__, ##args); }
 
-// include 8 byte 'comment' for vanityhashing
-#define IZO_END_RESERVE 8
-size_t zip_cdir_len = sizeof(ZipEndCentralDirRecord) + IZO_END_RESERVE;
+size_t zip_cdir_len = sizeof(ZipEndCentralDirRecord);
 size_t nzipfiles = 0;   // number of files in zip
 ZipCentralDirFileHeader *ziphdrs[256];
 
 static const int MB = 1024 * 1024;
 #define MAX_ID_LEN 31
 
-int g_num_sectors = 16; // after SystemArea
+static int g_num_sectors = 16; // after SystemArea
 int alloc_sectors(size_t n)
 {
     int r = g_num_sectors;
@@ -119,7 +117,7 @@ void izo_fill_dir_time(DirectoryRecord *dr, time_t t)
 #define FSEEK fseek
 #define STAT stat
 #define FWRITE(FP, PTR, LEN) \
-    if (fwrite(PTR, LEN, 1, FP) != 1) { perror("fwrite" #PTR); return -1; }
+    if (fwrite(PTR, LEN, 1, FP) != 1) { perror("fwrite(" #PTR ")"); return -1; }
 
 #define FWRITEAT(FP, POS, PTR, LEN) do { \
     FSEEK(FP, POS, SEEK_SET); \
@@ -275,32 +273,46 @@ size_t dirsize(const ISODir *d)
     return dirsize;
 }
 
+int openmapfile(const char *fn, const void **outptr, size_t *outlen)
+{
+    if (fn == NULL)
+        return -1;
+
+    struct stat st;
+
+    STAT(fn, &st);
+
+    int fd = open(fn, O_RDONLY);
+    if (fd < 0) {
+        perror(fn);
+        return fd;
+    } 
+  
+    *outptr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    *outlen = st.st_size;
+
+    return fd;
+}
 
 int mkfile(const char *localfn, const char *isodirname, const char *isofn)
 {
     ISODir *parent = find_isodir(isodirname);
-    struct stat st;
 
-    STAT(localfn, &st);
+    size_t filesize = 0;
+    const void *contents = NULL;
 
-    int nsectors = sectors(st.st_size);
-    int sector = alloc_sectors(nsectors+1);
-
-    int fd = open(localfn, O_RDONLY);
+    int fd = openmapfile(localfn, &contents, &filesize);
     if (fd < 0) {
-        perror(localfn);
-        return -1;
-    } 
-  
-    const char *contents =
-            mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+        return -1;    
+    }
 
-    // how hard to combine the copy and the crc?
-    uint32_t zipcrc = crc32(contents, st.st_size);
+    // combine the crc and copy
+    uint32_t zipcrc = crc32(contents, filesize);
 
-    FWRITEAT(fpizo, (sector+1) * SECTOR_SIZE, contents, st.st_size);
+    int sector = alloc_sectors(sectors(filesize));
+    FWRITEAT(fpizo, (sector+1) * SECTOR_SIZE, contents, filesize);
 
-    munmap((void *) contents, st.st_size);
+    munmap((void *) contents, filesize);
     close(fd);
 
     size_t id_len = strlen(isofn) + 2; // include space for ';1'
@@ -323,7 +335,7 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
     r->record_len = rlen;
 
     SET32_LSBMSB(*r, data_sector, sector);
-    SET32_LSBMSB(*r, data_len, st.st_size);
+    SET32_LSBMSB(*r, data_len, filesize);
 
     // volume_seq_num/volume_set_size is always 1/1
     SET16_LSBMSB(*r, volume_seq_num, 1);
@@ -360,7 +372,7 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
     chdr->time = lhdr->time = 0x00;
     chdr->crc32 = lhdr->crc32 = zipcrc;
     chdr->comp_size = chdr->uncomp_size = 
-        lhdr->comp_size = lhdr->uncomp_size = st.st_size;
+        lhdr->comp_size = lhdr->uncomp_size = filesize;
     chdr->filename_len = lhdr->filename_len = id_len;
 
     chdr->local_header_ofs = (sector + 1) * SECTOR_SIZE - lhdrlen;
@@ -501,7 +513,7 @@ fill_pvd(PrimaryVolumeDescriptor *pvd)
 }
 
 void usage_and_exit(const char *binname) {
-    fprintf(stderr, "Usage: %s -o <output-izo-name> <path-to-walk>\n", 
+    fprintf(stderr, "Usage: %s [-v] [-c <comment>] -o <output-izo-name> <path-to-walk>\n", 
             binname);
     exit(EXIT_FAILURE);
 }
@@ -514,16 +526,20 @@ int main(int argc, char **argv)
     assert(sizeof(ZipEndCentralDirRecord) == 22);
 
     char *outfn = NULL;
+    char *commentfn = NULL;
 
     int opt;
 
-    while ((opt = getopt(argc, argv, "o:v")) != -1) {
+    while ((opt = getopt(argc, argv, "c:o:v")) != -1) {
         switch (opt) {
         case 'o':
             outfn = strdup(optarg);
             break;
         case 'v':
             verbose++;
+            break;
+        case 'c': 
+            commentfn = strdup(optarg);
             break;
         default:
             usage_and_exit(argv[0]);
@@ -566,10 +582,25 @@ int main(int argc, char **argv)
     FSEEK(fpizo, 0, SEEK_END);
     long endpos = ftell(fpizo);
     long bytes_left_this_mb = MB - (endpos % MB);
+
+    const void *comment = NULL;
+    size_t commentlen = 0;
+    int commentfd = 0;
+    if (commentfn) {
+        commentfd = openmapfile(commentfn, &comment, &commentlen);
+        zip_cdir_len += commentlen;
+    }
+
     if (bytes_left_this_mb < zip_cdir_len) {
         endpos += MB;
     }
+
     endpos += bytes_left_this_mb;
+
+    if (commentfd > 0) {
+        FWRITEAT(fpizo, endpos - commentlen, comment, commentlen);
+        close(commentfd);
+    }
 
     FSEEK(fpizo, endpos - zip_cdir_len, SEEK_SET);
 
@@ -584,13 +615,11 @@ int main(int argc, char **argv)
 
     endcdir.signature = 0x06054b50;
     endcdir.central_dir_start = endpos - zip_cdir_len;
-    endcdir.central_dir_bytes = zip_cdir_len - sizeof(endcdir) - IZO_END_RESERVE;
+    endcdir.central_dir_bytes = zip_cdir_len - sizeof(endcdir) - commentlen;
     endcdir.disk_num_records = endcdir.total_num_records = nzipfiles;
-    endcdir.comment_len = IZO_END_RESERVE;
+    endcdir.comment_len = commentlen;
 
-    char zerobuf[IZO_END_RESERVE] = { 0 };
     FWRITE(fpizo, &endcdir, sizeof(endcdir));
-    FWRITE(fpizo, zerobuf, IZO_END_RESERVE);
 
     fclose(fpizo);
     return 0;

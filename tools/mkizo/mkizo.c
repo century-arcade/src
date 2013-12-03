@@ -18,6 +18,7 @@
 
 FILE *fpizo = NULL;
 const char *sourcepath = NULL;
+int verbose = 0;
 
 typedef struct ISODir {
     const char *name_in_parent;    // just the basename
@@ -33,13 +34,14 @@ typedef struct ISODir {
 
 ISODir root;
 
-#define LOG(FMTSTR, args...) fprintf(stderr, "%s: " FMTSTR "\n", __FUNCTION__, ## args)
+#define LOG(FMTSTR, args...) fprintf(stderr, FMTSTR "\n", ## args)
+#define VERBOSE(FMTSTR, args...) if (verbose) { LOG("%s: " FMTSTR, __FUNCTION__, ##args); }
 
 // include 8 byte 'comment' for vanityhashing
 #define IZO_END_RESERVE 8
 size_t zip_cdir_len = sizeof(ZipEndCentralDirRecord) + IZO_END_RESERVE;
 size_t nzipfiles = 0;   // number of files in zip
-ZipCentralDirFileHeader *ziphdrs[32];
+ZipCentralDirFileHeader *ziphdrs[256];
 
 static const int MB = 1024 * 1024;
 #define MAX_ID_LEN 31
@@ -73,6 +75,7 @@ const char *strncpypad(char *dest, const char *src, size_t destsize, char padch)
     return src;
 }
 
+
 void
 setdate(DecimalDateTime *ddt, const char *strdate)
 {
@@ -88,6 +91,16 @@ setdate(DecimalDateTime *ddt, const char *strdate)
     }
 }
 
+// generates a strdate from a time_t for use with setdate
+char * strdate(time_t t) {
+    static char buf[256];
+    struct tm tm;
+    memset(&tm, 0, sizeof(tm));
+//  BUG segfault:   localtime_r(&t, &tm);
+    strftime(buf, sizeof(buf), "%Y%m%d%H%M%S00%z", &tm);
+    return buf;
+}
+
 void izo_fill_dir_time(DirectoryRecord *dr, time_t t)
 {
     if (t == 0) return;
@@ -100,7 +113,7 @@ void izo_fill_dir_time(DirectoryRecord *dr, time_t t)
     dr->hour = tm.tm_hour;
     dr->minute = tm.tm_min;
     dr->second = tm.tm_sec;
-//    dr->gmt_offset = 0; // XXX: possible to set the timezone from stat info?
+//    dr->gmt_offset = 0; // XXX: can't set the timezone from stat info
 }
 
 #define FSEEK fseek
@@ -118,6 +131,22 @@ static inline int sectors(int nbytes)
     int nsectors = nbytes / SECTOR_SIZE;
     if (nbytes % SECTOR_SIZE > 0) nsectors += 1;
     return nsectors;
+}
+
+char *strtoupper(char *src)
+{
+    char *c;
+
+    if (!src){
+        return;
+    }
+    c = src;
+    while((*c)!='\0'){
+        (*c) = toupper(*c);
+        c++;
+    }
+
+    return src;
 }
 
 // caller responsible to free() dirfn and leaffn
@@ -216,7 +245,10 @@ ISODir * mkisodir(const char *dirname, const char *basename)
         d->name_in_parent = strdup(basename);
         d->parent = find_isodir(dirname);
         // make sure parent dir gets an entry with the right name
-        DirectoryRecord *r = newdirrecord(basename);
+        char uppername[256];
+        strcpy(uppername, basename);
+        strtoupper(uppername);
+        DirectoryRecord *r = newdirrecord(uppername);
         d->parent->records[d->parent->nrecords++] = r;
         d->parent->subdirs[d->parent->nsubdirs++] = d; 
         d->realrecord = r;
@@ -227,7 +259,7 @@ ISODir * mkisodir(const char *dirname, const char *basename)
     d->nrecords = 2;
     d->nsubdirs = 0;
 
-    LOG("'%s' into '%s'[%d]", basename, dirname, (int)d->parent->nrecords-1);
+    VERBOSE("'%s' into '%s'[%d]", basename, dirname, (int)d->parent->nrecords-1);
  
     return d;
 }
@@ -300,6 +332,7 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
 
     r->id_len = id_len;
     strcpy(r->id, isofn);
+    strtoupper(r->id);
     r->id[id_len-2] = ';';
     r->id[id_len-1] = '1';
 
@@ -352,7 +385,7 @@ int ftw_mkfile_helper(const char *fpath, const struct stat *sb, int typeflag)
     // strip leading path, divide into dirname and basename
     parsepath(&fpath[strlen(sourcepath)+1], &parentdirname, &nodename);
 
-    LOG("%s: %s %s", fpath, parentdirname, nodename);
+    VERBOSE("%s: %s %s", fpath, parentdirname, nodename);
 
     if (typeflag == FTW_F) {
         mkfile(fpath, parentdirname, nodename);
@@ -412,8 +445,19 @@ int finalize_dir(ISODir *d)
     return 0;
 }
 
-#define E(X) #X // TODO: getenv/config
-#define EINT(X) atoi(getenv(#X))
+const char *get_env_with_default(const char *fieldname, const char *defval)
+{
+    const char *val = getenv(fieldname);
+    if (val == NULL) {
+        VERBOSE("%s not specified, using default '%s'", fieldname, defval);
+        val = defval;
+    }
+    return strtoupper(strdup(val));
+}
+
+#define E(X) get_env_with_default(#X, #X)
+#define EINT(X, D) atoi(get_env_with_default(#X, #D))
+#define EDATE(X) get_env_with_default(#X, strdate(time(NULL)))
 
 int
 fill_pvd(PrimaryVolumeDescriptor *pvd)
@@ -427,9 +471,9 @@ fill_pvd(PrimaryVolumeDescriptor *pvd)
     strncpypad(pvd->system_id, E(system_id), 32, ' ');
     strncpypad(pvd->volume_id, E(volume_id), 32, ' ');
 
-    SET16_LSBMSB(*pvd, volume_set_size, 1);
-    SET16_LSBMSB(*pvd, volume_sequence_number, 1);
-    SET16_LSBMSB(*pvd, logical_block_size, 2048);
+    SET16_LSBMSB(*pvd, volume_set_size, EINT(volume_set_size, 1));
+    SET16_LSBMSB(*pvd, volume_sequence_number, EINT(volume_sequence_number, 1));
+    SET16_LSBMSB(*pvd, logical_block_size, EINT(logical_block_size, 2048));
 
     SET32_LSBMSB(*pvd, num_sectors, g_num_sectors);
 
@@ -448,10 +492,10 @@ fill_pvd(PrimaryVolumeDescriptor *pvd)
     strncpypad(pvd->abstract_file_id, E(abstract_file_id), 37, ' ');
     strncpypad(pvd->bibliographical_file_id, E(bibliographical_file_id), 37, ' ');
 
-    setdate(&pvd->creation_date, E(creation_date));
-    setdate(&pvd->modification_date, E(modification_date));
-    setdate(&pvd->expiration_date, E(expiration_date));
-    setdate(&pvd->effective_date, E(effective_date));
+    setdate(&pvd->creation_date, EDATE(creation_date));
+    setdate(&pvd->modification_date, EDATE(modification_date));
+    setdate(&pvd->expiration_date, EDATE(expiration_date));
+    setdate(&pvd->effective_date, EDATE(effective_date));
 
     pvd->file_structure_version = 0x01;
 }
@@ -473,10 +517,13 @@ int main(int argc, char **argv)
 
     int opt;
 
-    while ((opt = getopt(argc, argv, "o:")) != -1) {
+    while ((opt = getopt(argc, argv, "o:v")) != -1) {
         switch (opt) {
         case 'o':
             outfn = strdup(optarg);
+            break;
+        case 'v':
+            verbose++;
             break;
         default:
             usage_and_exit(argv[0]);

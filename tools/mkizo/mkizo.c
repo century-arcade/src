@@ -1,6 +1,7 @@
 #include <assert.h>
 #include <unistd.h>
 #include <stdint.h>
+#include <libgen.h> // dirname, basename
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -18,9 +19,21 @@
 FILE *fpizo = NULL;
 const char *sourcepath = NULL;
 
-size_t nrootfiles = 1;  // root[0] is rootdir itself
-DirectoryRecord *root[32];
-size_t rootsize = 2*sizeof(DirectoryRecord) + 2; // . and ..
+typedef struct ISODir {
+    const char *name_in_parent;    // just the basename
+    struct ISODir *parent;
+    DirectoryRecord *realrecord;   // same ptr as in parent.records[]
+
+    DirectoryRecord *records[256]; // [0] is self, [1] is parent
+    size_t nrecords;
+
+    struct ISODir *subdirs[256];
+    size_t nsubdirs;
+} ISODir;
+
+ISODir root;
+
+#define LOG(FMTSTR, args...) fprintf(stderr, "%s: " FMTSTR "\n", __FUNCTION__, ## args)
 
 // include 8 byte 'comment' for vanityhashing
 #define IZO_END_RESERVE 8
@@ -107,8 +120,133 @@ static inline int sectors(int nbytes)
     return nsectors;
 }
 
-int mkfile(const char *localfn, const char *isofn)
+// caller responsible to free() dirfn and leaffn
+static void parsepath(const char *path, char **dirfn, char **leaffn)
 {
+    char *duppath = strdup(path);
+    *dirfn = strdup(dirname(duppath));
+    free(duppath);
+
+    duppath = strdup(path);
+    *leaffn = strdup(basename(duppath));
+    free(duppath);
+}
+
+ISODir * find_isodir(const char *dirpath)
+{
+    if (strcmp(dirpath, ".") == 0) {
+        return &root;
+    }
+
+    char *parentdir = NULL;
+    char *dirfn = NULL;
+    parsepath(dirpath, &parentdir, &dirfn);
+
+    ISODir * parent = find_isodir(parentdir);
+
+    if (parent == NULL) {
+        LOG("directory '%s' could not be found (searching for '%s')", parentdir, dirpath);
+        return NULL;
+    }
+
+    size_t i;
+    for (i=0; i < parent->nsubdirs; ++i) {
+        if (strcmp(dirfn, parent->subdirs[i]->name_in_parent) == 0) {
+            return parent->subdirs[i];
+        }
+    }
+
+    LOG("'%s' could not be found in parent '%s' (looking for %s)", dirfn, parentdir, dirpath);
+
+    // XXX: other return paths leak these
+    free(dirfn);
+    free(parentdir);
+    return NULL;
+}
+
+DirectoryRecord *newrecord(const char *fn)
+{
+    size_t id_len = strlen(fn);
+    if (id_len == 0) {
+        id_len = 1;  // 'self', copy the null as the id
+    }
+
+    DirectoryRecord *r =
+        (DirectoryRecord *) malloc(sizeof(DirectoryRecord) + id_len);
+
+    // will also set id[0] to 0x0 if fn == NULL (as for root dir)
+    memset(r, 0, sizeof(DirectoryRecord) + id_len);
+
+    r->record_len = sizeof(DirectoryRecord) + id_len;
+
+    // volume_seq_num/volume_set_size is always 1/1
+    SET16_LSBMSB(*r, volume_seq_num, 1);
+//    izo_fill_dir_time(r, time(NULL));
+
+    r->id_len = id_len;
+
+    if (fn != NULL) { 
+        strcpy(r->id, fn);
+    }
+
+    return r;
+}
+
+DirectoryRecord *newdirrecord(const char *dirname)
+{
+    DirectoryRecord *d = newrecord(dirname);
+    d->flags |= ISO_DIRECTORY;
+    return d;
+}
+
+// fqpn in ISO/zip
+ISODir * mkisodir(const char *dirname, const char *basename)
+{
+    ISODir *d; 
+    if (strcmp(basename, ".") == 0) {
+        d = &root;
+        memset(d, 0, sizeof(ISODir));
+        d->parent = &root;
+        d->name_in_parent = "";
+        d->records[0] = newdirrecord("\x00"); // .
+        d->realrecord = d->records[0];
+    } else { 
+        d = (ISODir *) malloc(sizeof(ISODir));
+        memset(d, 0, sizeof(ISODir));
+        d->name_in_parent = strdup(basename);
+        d->parent = find_isodir(dirname);
+        // make sure parent dir gets an entry with the right name
+        DirectoryRecord *r = newdirrecord(basename);
+        d->parent->records[d->parent->nrecords++] = r;
+        d->parent->subdirs[d->parent->nsubdirs++] = d; 
+        d->realrecord = r;
+        d->records[0] = newdirrecord("\x00"); // .
+    }
+
+    d->records[1] = newdirrecord("\x01"); // .. allocated now but overwritten during finalization
+    d->nrecords = 2;
+    d->nsubdirs = 0;
+
+    LOG("'%s' into '%s'[%d]", basename, dirname, (int)d->parent->nrecords-1);
+ 
+    return d;
+}
+
+size_t dirsize(const ISODir *d)
+{
+    size_t dirsize = 0;
+    size_t i;
+    for (i=0; i < d->nrecords; ++i) {
+        DirectoryRecord *f = d->records[i];
+        dirsize += f->record_len;
+    }
+    return dirsize;
+}
+
+
+int mkfile(const char *localfn, const char *isodirname, const char *isofn)
+{
+    ISODir *parent = find_isodir(isodirname);
     struct stat st;
 
     STAT(localfn, &st);
@@ -126,7 +264,7 @@ int mkfile(const char *localfn, const char *isofn)
             mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
 
     // how hard to combine the copy and the crc?
-    uint32_t crc = crc32(contents, st.st_size);
+    uint32_t zipcrc = crc32(contents, st.st_size);
 
     FWRITEAT(fpizo, (sector+1) * SECTOR_SIZE, contents, st.st_size);
 
@@ -145,7 +283,7 @@ int mkfile(const char *localfn, const char *isofn)
     // of the preceding Directory Record in that Logical Sector. Each
     // Directory Record shall end in the Logical Sector in which it
     // begins."
-    int bytes_left_in_sector = SECTOR_SIZE - (rootsize % SECTOR_SIZE);
+    int bytes_left_in_sector = SECTOR_SIZE - (dirsize(parent) % SECTOR_SIZE);
     if (sizeof(DirectoryRecord) + MAX_ID_LEN > bytes_left_in_sector) {
         rlen += bytes_left_in_sector;
     }
@@ -165,11 +303,15 @@ int mkfile(const char *localfn, const char *isofn)
     r->id[id_len-2] = ';';
     r->id[id_len-1] = '1';
 
-    size_t fidx = nrootfiles++;
-    root[fidx] = r;
-    rootsize += r->record_len;
+    parent->records[parent->nrecords++] = r;
 
     // construct ZIP local and central dir headers
+    // reconstruct the full path/fn
+    char fullfn[256] = { 0 };
+    snprintf(fullfn, sizeof(fullfn), "%s/%s", isodirname, isofn);
+
+    // id_len now includes the pathname
+    id_len = strlen(fullfn);
 
     size_t chdrlen = sizeof(ZipCentralDirFileHeader) + id_len;
     ZipCentralDirFileHeader * chdr = (ZipCentralDirFileHeader *) malloc(chdrlen);
@@ -183,14 +325,14 @@ int mkfile(const char *localfn, const char *isofn)
     lhdr->signature = 0x04034b50;
     chdr->date = lhdr->date = 0x00;
     chdr->time = lhdr->time = 0x00;
-    chdr->crc32 = lhdr->crc32 = crc;
+    chdr->crc32 = lhdr->crc32 = zipcrc;
     chdr->comp_size = chdr->uncomp_size = 
         lhdr->comp_size = lhdr->uncomp_size = st.st_size;
     chdr->filename_len = lhdr->filename_len = id_len;
 
     chdr->local_header_ofs = (sector + 1) * SECTOR_SIZE - lhdrlen;
-    strcpy(chdr->filename, isofn);
-    strcpy(lhdr->filename, isofn);
+    strcpy(chdr->filename, fullfn);
+    strcpy(lhdr->filename, fullfn);
 
     // write zip local header
     FWRITEAT(fpizo, chdr->local_header_ofs, lhdr, lhdrlen);
@@ -204,41 +346,70 @@ int mkfile(const char *localfn, const char *isofn)
 
 int ftw_mkfile_helper(const char *fpath, const struct stat *sb, int typeflag)
 {
+    char *parentdirname = NULL;
+    char *nodename = NULL;
+
+    // strip leading path, divide into dirname and basename
+    parsepath(&fpath[strlen(sourcepath)+1], &parentdirname, &nodename);
+
+    LOG("%s: %s %s", fpath, parentdirname, nodename);
+
     if (typeflag == FTW_F) {
-        // strip leading path
-        const char *isopath = &fpath[strlen(sourcepath)+1];
-        mkfile(fpath, isopath);
+        mkfile(fpath, parentdirname, nodename);
     } else if (typeflag == FTW_D) {
-        // deal with directory
+        mkisodir(parentdirname, nodename);
     } else {
         perror("ftw_mkfile_helper");
         return -2;
     }
+
+    free(parentdirname);
+    free(nodename);
     return 0;
 }
 
-DirectoryRecord * mkroot()
+int finalize_dir(ISODir *d)
 {
-    size_t id_len = 1;
+    size_t dirlen = dirsize(d);
 
-    DirectoryRecord *r =
-        (DirectoryRecord *) malloc(sizeof(DirectoryRecord) + id_len);
+    int sectors_reqd_for_dir = sectors(dirlen);
+    int dirsector = alloc_sectors(sectors_reqd_for_dir);
 
-    // will also set id[0] to 0x0 if fn == NULL (as for root dir)
-    memset(r, 0, sizeof(DirectoryRecord) + id_len);
+    // finalize the real record in the parent
+    SET32_LSBMSB(*d->realrecord, data_sector, dirsector);
+    SET32_LSBMSB(*d->realrecord, data_len, dirlen);
 
-    r->record_len = sizeof(DirectoryRecord) + id_len;
+    // copy that record as our 'self'
+    d->records[0] = newdirrecord(".");
+    memcpy(d->records[0], d->realrecord, sizeof(DirectoryRecord));
+    d->records[0]->id_len = 1;
+    d->records[0]->id[0] = 0x00; // replace '.'
 
-    // volume_seq_num/volume_set_size is always 1/1
-    SET16_LSBMSB(*r, volume_seq_num, 1);
-//    izo_fill_dir_time(r, time(NULL));
+    // copy the parent (..) 'self' entry
+    assert(d->parent->records[0]->data_sector > 0); // must be allocated already
+    memcpy(d->records[1], d->parent->records[0], sizeof(DirectoryRecord));
+    assert(d->records[1]->id_len == 1);
+    assert(d->records[1]->id[0] == 0x01);
 
-    r->flags |= ISO_DIRECTORY;
-    r->id_len = id_len;
+    // descend into child directories, allocate and write them first
 
-//    if (fn != NULL) { strcpy(r->id, fn); }
+    size_t i;
 
-    return r;
+    for (i=0; i < d->nsubdirs; ++i)
+    {
+        finalize_dir(d->subdirs[i]);
+    }
+
+    // finally, write the directory itself
+    FSEEK(fpizo, dirsector * SECTOR_SIZE, SEEK_SET);
+
+    for (i=0; i < d->nrecords; ++i)
+    {
+        DirectoryRecord *f = d->records[i];
+        FWRITE(fpizo, f, f->record_len);
+    }
+
+    return 0;
 }
 
 #define E(X) #X // TODO: getenv/config
@@ -327,41 +498,25 @@ int main(int argc, char **argv)
 //    int br_sector = alloc_sectors(1);   // Boot Record
     int vdst_sector = alloc_sectors(1); // Volume Descriptor Set Terminator
 
-    root[0] = mkroot();
+    memset(&root, 0, sizeof(root));
 
     if (ftw(sourcepath, ftw_mkfile_helper, 16) < 0) {
         perror("ftw");
         exit(-1);
     }
 
-    // might need more than 1, but alloc_sectors won't be used after this
-    int rootsector = alloc_sectors(1);
-
-    root[0]->record_len = sizeof(DirectoryRecord) + 1;
-    SET32_LSBMSB(*root[0], data_sector, rootsector);
-    SET32_LSBMSB(*root[0], data_len, rootsize);
+    finalize_dir(&root);
 
     // write the PVD
- 
     PrimaryVolumeDescriptor pvd;
     fill_pvd(&pvd);
-    memcpy(&pvd.root_directory_record, root[0], sizeof(DirectoryRecord));
+    memcpy(&pvd.root_directory_record, root.records[0], sizeof(DirectoryRecord));
 
     FWRITEAT(fpizo, pvd_sector * SECTOR_SIZE, &pvd, sizeof(pvd));
 
     FWRITEAT(fpizo, vdst_sector * SECTOR_SIZE, VolumeDescriptorSetTerminator, sizeof(VolumeDescriptorSetTerminator));
 
-    // write the root/. entry
-    FWRITEAT(fpizo, rootsector * SECTOR_SIZE, root[0], root[0]->record_len);
-
-    root[0]->id[0] = 0x01; // root/..
-
-    size_t r;
-    for (r=0; r < nrootfiles; ++r)
-    {
-        FWRITE(fpizo, root[r], root[r]->record_len);
-    }
-
+    FSEEK(fpizo, 0, SEEK_END);
     long endpos = ftell(fpizo);
     long bytes_left_this_mb = MB - (endpos % MB);
     if (bytes_left_this_mb < zip_cdir_len) {
@@ -371,6 +526,7 @@ int main(int argc, char **argv)
 
     FSEEK(fpizo, endpos - zip_cdir_len, SEEK_SET);
 
+    size_t r;
     for (r=0; r < nzipfiles; ++r)
     {
         FWRITE(fpizo, ziphdrs[r], sizeof(ZipCentralDirFileHeader) + ziphdrs[r]->filename_len);

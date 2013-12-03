@@ -7,6 +7,7 @@
 #include <string.h>
 #include <time.h>
 
+#include <sys/param.h> // MIN
 #include <sys/mman.h> // mmap
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -131,17 +132,17 @@ static inline int sectors(int nbytes)
     return nsectors;
 }
 
+// modifies string in-place
 char *strtoupper(char *src)
 {
     char *c;
 
-    if (!src){
+    if (src == NULL) {
         return;
     }
-    c = src;
-    while((*c)!='\0'){
-        (*c) = toupper(*c);
-        c++;
+
+    for (c = src; *c; ++c) {
+        *c = toupper(*c);
     }
 
     return src;
@@ -226,7 +227,6 @@ DirectoryRecord *newdirrecord(const char *dirname)
     return d;
 }
 
-// fqpn in ISO/zip
 ISODir * mkisodir(const char *dirname, const char *basename)
 {
     ISODir *d; 
@@ -394,8 +394,13 @@ int ftw_mkfile_helper(const char *fpath, const struct stat *sb, int typeflag)
     char *parentdirname = NULL;
     char *nodename = NULL;
 
+    size_t srcpathlen = strlen(sourcepath);
+    if (fpath[srcpathlen-1] != '/') {
+        srcpathlen += 1; // there will be a path separator anyway
+    }
+
     // strip leading path, divide into dirname and basename
-    parsepath(&fpath[strlen(sourcepath)], &parentdirname, &nodename);
+    parsepath(&fpath[srcpathlen], &parentdirname, &nodename);
 
     VERBOSE("%s: %s %s", fpath, parentdirname, nodename);
 
@@ -411,6 +416,13 @@ int ftw_mkfile_helper(const char *fpath, const struct stat *sb, int typeflag)
     free(parentdirname);
     free(nodename);
     return 0;
+}
+
+static int cmp_dirrecord(const void *_a, const void *_b)
+{
+    const DirectoryRecord *a = *(const DirectoryRecord **) _a;
+    const DirectoryRecord *b = *(const DirectoryRecord **) _b;
+    return memcmp(a->id, b->id, MIN(a->id_len, b->id_len));
 }
 
 int finalize_dir(ISODir *d)
@@ -444,6 +456,8 @@ int finalize_dir(ISODir *d)
     {
         finalize_dir(d->subdirs[i]);
     }
+
+    qsort(&d->records[2], d->nrecords-2, sizeof(d->records[0]), cmp_dirrecord);
 
     // finally, write the directory itself
     FSEEK(fpizo, dirsector * SECTOR_SIZE, SEEK_SET);

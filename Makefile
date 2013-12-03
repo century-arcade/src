@@ -76,11 +76,11 @@ endif
 
 PUBL ?= Century Arcade # PUBLISHER_ID
 PREP ?=                  PREPARER_ID
-SYSI ?= Linux          # SYSTEM_ID
+SYSI ?= LINUX          # SYSTEM_ID
 VOLI ?=                  VOLUME_ID
 VOLS ?=                  VOLUMESET_ID
 ABST ?= README.TXT     # ABSTRACT_FILE
-APPI ?= Linux          # APPLICATION_ID
+APPI ?= LINUX          # APPLICATION_ID
 COPY ?= README.TXT     # COPYRIGHT_FILE
 BIBL ?= README.TXT     # BIBLIOGRAPHIC_FILE
 
@@ -100,11 +100,15 @@ PLATFORMSRC = $(ARCADE)/src/$(PLATFORM)
 
 ifdef GAME
 ISOROOT = $(BUILDDIR)/$(GAME).isoroot
-
-all: $(GAME)-$(VERSION).iso.zip
+VERSION = -$(PLATFORMVER)$(GAMEVER)
 endif
 
+all:
+
 include $(ARCADE)/src/Makefile.$(PLATFORM)
+
+all: $(GAME)$(VERSION).iso.zip
+
 
 $(DOWNLOADS)/linux-$(LINUX_VER).tar.xz:
 	$(WGET) https://www.kernel.org/pub/linux/kernel/v3.x/linux-$(LINUX_VER).tar.xz
@@ -177,26 +181,26 @@ iso-setup: clean-iso
 vaingold:
 	truncate --size=8 $@
 
-%-$(VERSION).iso: %.isoroot $(PLATFORM) vaingold
+%$(VERSION).iso: %.isoroot $(PLATFORM) vaingold
 	system_id="$(SYSI)" \
 	volume_id="$(VOLI)" \
 	volume_set_id="$(VOLS)" \
-	publisher_id="$(PUBL)" \
 	preparer_id="$(PREP)" \
+	publisher_id="$(PUBL)" \
 	application_id="$(APPI)" \
 	copyright_file_id="$(COPY)" \
 	abstract_file_id="$(ABST)" \
 	bibliographical_file_id="$(BIBL)" \
-	creation_date='1900010000000000+0000' \
-	modification_date='1900010000000000+0000' \
-	expiration_date='1900010000000000+0000' \
-	effective_date='1900010000000000+0000' \
+	creation_date="$(CREATED)" \
+	modification_date="$(MODIFIED)" \
+	expiration_date="$(EXPIRES)" \
+	effective_date="$(EFFECTIVE)" \
 		$(MKIZO) -c vaingold \
 		-o $@ \
 		$(ISOROOT)/
 #		-b boot/isolinux.bin \
 
-%-$(VERSION).iso.zip: %-$(VERSION).iso vanityhasher
+%$(VERSION).iso.zip: %$(VERSION).iso vanityhasher
 	$(VANITY_HASHER) $(VANITY_OPTS) $<
 	zip $@ $<
 
@@ -205,7 +209,7 @@ endif # PLATFORM
 %.lss: %.jpg
 	$(ARCADE)/src/tools/mksplash.sh $< $@
 
-izomaker:
+izomaker: $(MKIZO)
 	$(MAKE) -C $(ARCADE)/src/tools/mkizo
 
 vanityhasher:

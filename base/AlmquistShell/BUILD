@@ -1,8 +1,11 @@
 PREP = Saul Pwanson <saul@century-arcade.org>
 PUBL = Century Arcade (2013)
-VOLS = The Almquist Shell
+VOLS = The_Almquist_Shell
+CREATED = 1989053018425500+0000
+EXPIRES = 2114010104444400+0000
+EFFECTIVE = 2013123119000000+0000
 
-VERSION = 0.9
+GAMEVER=.01
 
 PLATFORM=base
 

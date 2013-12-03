@@ -1,3 +1,4 @@
+PLATFORMVER=0.81
 #
 # The 'base' platform should include all relevant drivers and utilities.
 #

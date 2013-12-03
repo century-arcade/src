@@ -395,7 +395,7 @@ int ftw_mkfile_helper(const char *fpath, const struct stat *sb, int typeflag)
     char *nodename = NULL;
 
     // strip leading path, divide into dirname and basename
-    parsepath(&fpath[strlen(sourcepath)+1], &parentdirname, &nodename);
+    parsepath(&fpath[strlen(sourcepath)], &parentdirname, &nodename);
 
     VERBOSE("%s: %s %s", fpath, parentdirname, nodename);
 

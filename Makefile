@@ -105,10 +105,9 @@ endif
 
 all:
 
-include $(ARCADE)/src/Makefile.$(PLATFORM)
+include $(ARCADE)/src/$(PLATFORM)/Makefile.inc
 
 all: $(GAME)$(VERSION).iso.zip
-
 
 $(DOWNLOADS)/linux-$(LINUX_VER).tar.xz:
 	$(WGET) https://www.kernel.org/pub/linux/kernel/v3.x/linux-$(LINUX_VER).tar.xz

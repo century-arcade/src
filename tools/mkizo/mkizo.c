@@ -31,6 +31,8 @@ typedef struct ISODir {
 
     struct ISODir *subdirs[256];
     size_t nsubdirs;
+
+    int pte_num;
 } ISODir;
 
 ISODir root;
@@ -41,6 +43,10 @@ ISODir root;
 size_t zip_cdir_len = sizeof(ZipEndCentralDirRecord);
 size_t nzipfiles = 0;   // number of files in zip
 ZipCentralDirFileHeader *ziphdrs[256];
+
+PathTableEntry *paths[256];
+size_t npaths = 0;
+size_t pathtablesize = 0; // keep a running tally
 
 static const int MB = 1024 * 1024;
 #define MAX_ID_LEN 31
@@ -73,7 +79,6 @@ const char *strncpypad(char *dest, const char *src, size_t destsize, char padch)
 
     return src;
 }
-
 
 void
 setdate(DecimalDateTime *ddt, const char *strdate)
@@ -425,6 +430,15 @@ static int cmp_dirrecord(const void *_a, const void *_b)
     return memcmp(a->id, b->id, MIN(a->id_len, b->id_len));
 }
 
+size_t ptesize(size_t id_len)
+{
+    size_t ptelen = sizeof(PathTableEntry) + id_len;
+    if (id_len % 2 == 1) {
+        ptelen += 1; // padding
+    }
+    return ptelen;
+}
+
 int finalize_dir(ISODir *d)
 {
     size_t dirlen = dirsize(d);
@@ -435,6 +449,22 @@ int finalize_dir(ISODir *d)
     // finalize the real record in the parent
     SET32_LSBMSB(*d->realrecord, data_sector, dirsector);
     SET32_LSBMSB(*d->realrecord, data_len, dirlen);
+
+    size_t ptelen = ptesize(d->realrecord->id_len);
+
+    PathTableEntry *pte = (PathTableEntry *) malloc(ptelen);
+    memset(pte, 0, ptelen);
+    d->pte_num = npaths++;
+    pte->id_len = d->realrecord->id_len;
+    pte->ear_length = d->realrecord->ear_sectors;
+    pte->dir_sector = d->realrecord->data_sector;
+    pte->parent_dir_num = d->parent->pte_num;
+    memcpy(pte->id, d->name_in_parent, pte->id_len);
+    // XXX: uppercase pte->id
+
+    LOG("PTE[%u] @%u: %s (parent [%u])", d->pte_num, pte->dir_sector, pte->id, pte->parent_dir_num);
+    paths[d->pte_num] = pte;
+    pathtablesize += ptelen;
 
     // copy that record as our 'self'
     d->records[0] = newdirrecord(".");
@@ -532,6 +562,35 @@ void usage_and_exit(const char *binname) {
     exit(EXIT_FAILURE);
 }
 
+int construct_path_tables(void **lpath, void **mpath)
+{
+    char *lsb = malloc(pathtablesize);
+    char *msb = malloc(pathtablesize);
+
+    *lpath = lsb;
+    *mpath = msb;
+
+    size_t i;
+    for (i=0; i < npaths; i++)
+    {
+        PathTableEntry *lsb_pte = (PathTableEntry *) lsb;
+        PathTableEntry *msb_pte = (PathTableEntry *) msb;
+
+        size_t ptelen = ptesize(paths[i]->id_len);
+        memcpy(lsb_pte, paths[i], ptelen);
+
+        // copy also into mpath table and make bigendian
+        memcpy(msb_pte, paths[i], ptelen);
+        msb_pte->dir_sector = htonl(lsb_pte->dir_sector);
+        msb_pte->parent_dir_num = htons(lsb_pte->parent_dir_num);
+
+        lsb += ptelen;
+        msb += ptelen;
+    }
+
+    return pathtablesize;
+}
+
 int main(int argc, char **argv)
 {
     assert(crc32("123456789", 9) == 0xcbf43926);
@@ -584,15 +643,35 @@ int main(int argc, char **argv)
 
     finalize_dir(&root);
 
-    // write the PVD
+    // construct the PVD
     PrimaryVolumeDescriptor pvd;
     fill_pvd(&pvd);
+
     memcpy(&pvd.root_directory_record, root.records[0], sizeof(DirectoryRecord));
+    // construct and write both path tables
 
+    void *lsb_path_table = NULL;
+    void *msb_path_table = NULL;
+
+    int pathtablelen = construct_path_tables(&lsb_path_table, &msb_path_table);
+
+    SET32_LSBMSB(pvd, path_table_size, pathtablelen);
+    pvd.lsb_path_table_sector = alloc_sectors(sectors(pvd.path_table_size));
+
+    int msb_path_table_sector = alloc_sectors(sectors(pvd.path_table_size));
+    pvd.msb_path_table_sector = htonl(msb_path_table_sector);
+
+    FWRITEAT(fpizo, pvd.lsb_path_table_sector * SECTOR_SIZE, lsb_path_table, pvd.path_table_size);
+
+    FWRITEAT(fpizo, msb_path_table_sector * SECTOR_SIZE, msb_path_table, pvd.path_table_size);
+
+    // (LEAK: path tables)
+
+    // write the PVD and VDST
     FWRITEAT(fpizo, pvd_sector * SECTOR_SIZE, &pvd, sizeof(pvd));
-
     FWRITEAT(fpizo, vdst_sector * SECTOR_SIZE, VolumeDescriptorSetTerminator, sizeof(VolumeDescriptorSetTerminator));
 
+    // extend to a multiple of 1MB and write the zip comment
     FSEEK(fpizo, 0, SEEK_END);
     long endpos = ftell(fpizo);
     long bytes_left_this_mb = MB - (endpos % MB);
@@ -616,6 +695,7 @@ int main(int argc, char **argv)
         close(commentfd);
     }
 
+    // write the .zip Central Directory
     FSEEK(fpizo, endpos - zip_cdir_len, SEEK_SET);
 
     size_t r;

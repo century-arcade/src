@@ -3,6 +3,9 @@
 
 #include <stdint.h>
 
+#define SECTOR_SIZE 2048
+#define PACKED __attribute__ ((__packed__))
+
 typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
@@ -102,7 +105,44 @@ typedef struct PrimaryVolumeDescriptor {
 	u8 __unused4;
 	u8 application_data[512];
 	u8 __unused5;
-} PrimaryVolumeDescriptor;
+} PrimaryVolumeDescriptor;   // must be at sector 16
+
+typedef struct PACKED ElToritoBootRecord {
+	u8   type;        // VDTYPE_BOOT = 0
+    char id[5];       // "CD001"
+    u8   version;     // 0x01
+    char boot_system_id[32];  // "EL TORITO SPECIFICATION" padded with 0
+    char boot_id[32]; // must be 0
+    u32  boot_catalog_sector;
+    char unused[1973];
+} ElToritoBootRecord;  // must be at sector 17
+
+typedef struct PACKED {
+    u8   header_id;   // 0x01
+    u8   platform_id; // 0x00 = 80x86
+    u16  reserved;
+    char id[24];      // manufacturer/developer of CD-ROM
+    u16  checksum;    // sum of all words in the record should be 0
+    u8   key[2];      // 0x55, 0xAA
+} ElToritoValidationEntry;
+
+typedef struct PACKED {
+    u8   boot_indicator;  // 0x88 = Bootable
+    u8   boot_media_type; // 0x00 = No Emulation
+    u16  load_segment;    // 0x07c0 (also default)
+    u8   system_type;     // byte 5 from Partition Table in boot image
+    u8   __unused;
+    u16  sector_count;    // number of virtual/emulated sectors loaded by bios
+    u32  load_rba;        // start address of virtual disk
+    u8   __unused2[20];
+} ElToritoDefaultEntry;
+
+typedef struct PACKED {
+    u8 header_indicator;  // 0x91 = Final Header
+    u8 platform_id;       // 0x00 = 80x86
+    u16 num_entries;      // number of section entries following == 0
+    u8 id[28];            // irrelevant if no section entries
+} ElToritoSectionHeaderEntry;
 
 #ifdef UNNEEDED // VDST always has the same contents
 typedef struct {
@@ -121,8 +161,6 @@ enum  {
     VDTYPE_PARTITION = 3,
     VDTYPE_END = 255,
 };
-
-const int SECTOR_SIZE = 2048;
 
 typedef struct PathTableEntry {
     u8 id_len;

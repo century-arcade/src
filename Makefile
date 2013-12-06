@@ -196,8 +196,8 @@ vaingold:
 	effective_date="$(EFFECTIVE)" \
 		$(MKIZO) -c vaingold \
 		-o $@ \
+		-b boot/isolinux.bin \
 		$(ISOROOT)/
-#		-b boot/isolinux.bin \
 
 %$(VERSION).iso.zip: %$(VERSION).iso vanityhasher
 	$(VANITY_HASHER) $(VANITY_OPTS) $<

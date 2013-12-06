@@ -48,6 +48,9 @@ PathTableEntry *paths[256];
 size_t npaths = 0;
 size_t pathtablesize = 0; // keep a running tally
 
+const char* bootfn = NULL;
+int bootloader_sector = 0; // where the bootfn is stored
+
 static const int MB = 1024 * 1024;
 #define MAX_ID_LEN 31
 
@@ -78,6 +81,31 @@ const char *strncpypad(char *dest, const char *src, size_t destsize, char padch)
     }
 
     return src;
+}
+
+u16 checksum(const u8 *data, size_t nbytes)
+{
+    const u16 *words = (const u16 *) data;
+    u16 sum = 0;
+
+    size_t i;
+    for (i=0; i < nbytes/sizeof(u16); ++i) {
+        sum += words[i];
+    }
+    return sum;
+}
+
+u32 checksum32(const u8 *data, size_t nbytes)
+{
+    const u32 *words = (const u32 *) data;
+    u32 sum = 0;
+
+    size_t i;
+    for (i=0; i < nbytes/sizeof(u32); ++i) {
+        sum += words[i];
+    }
+    assert(i * sizeof(u32) == nbytes);
+    return sum;
 }
 
 void
@@ -278,7 +306,7 @@ size_t dirsize(const ISODir *d)
     return dirsize;
 }
 
-int openmapfile(const char *fn, const void **outptr, size_t *outlen)
+int openmapfile(const char *fn, void **outptr, size_t *outlen)
 {
     if (fn == NULL)
         return -1;
@@ -292,8 +320,9 @@ int openmapfile(const char *fn, const void **outptr, size_t *outlen)
         perror(fn);
         return fd;
     } 
-  
-    *outptr = mmap(NULL, st.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+ 
+    // allow private writes for the boot-info-table
+    *outptr = mmap(NULL, st.st_size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
     *outlen = st.st_size;
 
     return fd;
@@ -304,9 +333,9 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
     ISODir *parent = find_isodir(isodirname);
 
     size_t filesize = 0;
-    const void *contents = NULL;
+    char *contents = NULL;
 
-    int fd = openmapfile(localfn, &contents, &filesize);
+    int fd = openmapfile(localfn, (void **) &contents, &filesize);
     if (fd < 0) {
         return -1;    
     }
@@ -314,8 +343,28 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
     // combine the crc and copy
     uint32_t zipcrc = crc32(contents, filesize);
 
-    int sector = alloc_sectors(sectors(filesize));
-    FWRITEAT(fpizo, (sector+1) * SECTOR_SIZE, contents, filesize);
+    int ziphdr_sector = alloc_sectors(sectors(filesize) + 1);
+    int data_sector = ziphdr_sector + 1;
+
+    // reconstruct the full path/fn
+    char fullfn[256] = { 0 };
+    snprintf(fullfn, sizeof(fullfn), "%s/%s", isodirname, isofn);
+
+    // check if this is the bootloader
+    if (bootfn && strcmp(fullfn, bootfn) == 0) {
+        bootloader_sector = data_sector;
+
+        // fixup the boot image with the -boot-info-table
+
+        uint32_t *bootinfotbl = (uint32_t *) &contents[8];
+        bootinfotbl[0] = 16; // pvd_sector;
+        bootinfotbl[1] = bootloader_sector;
+        bootinfotbl[2] = filesize;
+        bootinfotbl[3] = checksum32(&contents[64], filesize - 64);
+        memset(&bootinfotbl[4], 0, 40);
+    }
+
+    FWRITEAT(fpizo, data_sector * SECTOR_SIZE, contents, filesize);
 
     munmap((void *) contents, filesize);
     close(fd);
@@ -339,7 +388,7 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
 
     r->record_len = rlen;
 
-    SET32_LSBMSB(*r, data_sector, sector);
+    SET32_LSBMSB(*r, data_sector, data_sector);
     SET32_LSBMSB(*r, data_len, filesize);
 
     // volume_seq_num/volume_set_size is always 1/1
@@ -356,10 +405,7 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
     parent->records[parent->nrecords++] = r;
 
     // construct ZIP local and central dir headers
-    // reconstruct the full path/fn
-    char fullfn[256] = { 0 };
-    snprintf(fullfn, sizeof(fullfn), "%s/%s", isodirname, isofn);
-
+ 
     // id_len now includes the pathname
     id_len = strlen(fullfn);
 
@@ -380,7 +426,7 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
         lhdr->comp_size = lhdr->uncomp_size = filesize;
     chdr->filename_len = lhdr->filename_len = id_len;
 
-    chdr->local_header_ofs = (sector + 1) * SECTOR_SIZE - lhdrlen;
+    chdr->local_header_ofs = data_sector * SECTOR_SIZE - lhdrlen;
     strcpy(chdr->filename, fullfn);
     strcpy(lhdr->filename, fullfn);
 
@@ -515,6 +561,56 @@ const char *get_env_with_default(const char *fieldname, const char *defval)
 #define EINT(X, D) atoi(get_env_with_default(#X, #D))
 #define EDATE(X) get_env_with_default(#X, strdate(time(NULL)))
 
+#define COPYENV(DEST, F, PAD) strncpypad(DEST, E(F), sizeof(DEST), PAD)
+
+#define CATALOG_ENTRY_SIZE 0x20
+void el_torito(u8 *boot_record, u8 *boot_catalog, int boot_catalog_sector)
+{
+    ElToritoBootRecord *etbr = (ElToritoBootRecord *) boot_record;
+    // Boot Record
+    static char base_ETBR[SECTOR_SIZE] =
+            "\x00" "CD001" "\x01" "EL TORITO SPECIFICATION";
+
+    // not all are this type, but all entries are the same size, and this is
+    // only for spacing
+    ElToritoValidationEntry *entries = (ElToritoValidationEntry *) boot_catalog;
+
+    assert(sizeof(*etbr) == SECTOR_SIZE);
+    memcpy(etbr, base_ETBR, SECTOR_SIZE);
+
+    etbr->boot_catalog_sector = boot_catalog_sector;
+
+    // Boot Catalog
+    ElToritoValidationEntry *etve = (ElToritoValidationEntry *) &entries[0];
+    ElToritoDefaultEntry *etdefault = (ElToritoDefaultEntry *) &entries[1];
+    ElToritoSectionHeaderEntry *etshe = (ElToritoSectionHeaderEntry *) &entries[2];
+    assert(sizeof(*etve) == CATALOG_ENTRY_SIZE);
+    assert(sizeof(*etdefault) == CATALOG_ENTRY_SIZE);
+    assert(sizeof(*etshe) == CATALOG_ENTRY_SIZE);
+
+    // Validation Entry
+    memset(etve, 0, CATALOG_ENTRY_SIZE);
+    etve->header_id = 0x01;
+    COPYENV(etve->id, developer_id, 0);
+    etve->key[0] = 0x55;
+    etve->key[1] = 0xAA;
+    etve->checksum = -checksum((const u8 *) etve, sizeof(*etve));
+    assert(checksum((const u8 *) etve, sizeof(*etve)) == 0);
+
+    // Initial/Default Entry
+    memset(etdefault, 0, CATALOG_ENTRY_SIZE);
+    etdefault->boot_indicator = 0x88;
+    etdefault->load_segment = 0x07c0;
+    // etdefault->system_type = from partition table??
+    etdefault->sector_count = 4;
+    etdefault->load_rba = bootloader_sector;
+
+    static char base_ETSHE[CATALOG_ENTRY_SIZE] = "\x91\x00";
+
+    memcpy(etshe, base_ETSHE, CATALOG_ENTRY_SIZE);
+}
+
+
 int
 fill_pvd(PrimaryVolumeDescriptor *pvd)
 {
@@ -603,16 +699,19 @@ int main(int argc, char **argv)
 
     int opt;
 
-    while ((opt = getopt(argc, argv, "c:o:v")) != -1) {
+    while ((opt = getopt(argc, argv, "c:o:b:v")) != -1) {
         switch (opt) {
-        case 'o':
+        case 'b':         // file containing bootloader
+            bootfn = strdup(optarg);
+            break;
+        case 'c':         // zip comment field
+            commentfn = strdup(optarg);
+            break;
+        case 'o':         // output file (required)
             outfn = strdup(optarg);
             break;
         case 'v':
             verbose++;
-            break;
-        case 'c': 
-            commentfn = strdup(optarg);
             break;
         default:
             usage_and_exit(argv[0]);
@@ -630,10 +729,13 @@ int main(int argc, char **argv)
 
     fpizo = fopen(outfn, "w+b");
     int pvd_sector = alloc_sectors(1);   // Primary Volume Descriptor
-    assert(pvd_sector == 16);
-//    int br_sector = alloc_sectors(1);   // Boot Record
+    int br_sector = alloc_sectors(1);   // Boot Record
     int vdst_sector = alloc_sectors(1); // Volume Descriptor Set Terminator
 
+    assert(pvd_sector == 16);
+    assert(br_sector == 17);
+
+    int boot_catalog_sector = alloc_sectors(1);
     memset(&root, 0, sizeof(root));
 
     if (ftw(sourcepath, ftw_mkfile_helper, 16) < 0) {
@@ -642,6 +744,13 @@ int main(int argc, char **argv)
     }
 
     finalize_dir(&root);
+
+    u8 boot_record[SECTOR_SIZE]; 
+    u8 boot_catalog[SECTOR_SIZE];
+
+    el_torito(boot_record, boot_catalog, boot_catalog_sector);
+    FWRITEAT(fpizo, boot_catalog_sector * SECTOR_SIZE, boot_catalog, SECTOR_SIZE);
+    FWRITEAT(fpizo, br_sector * SECTOR_SIZE, boot_record, SECTOR_SIZE);
 
     // construct the PVD
     PrimaryVolumeDescriptor pvd;
@@ -676,7 +785,7 @@ int main(int argc, char **argv)
     long endpos = ftell(fpizo);
     long bytes_left_this_mb = MB - (endpos % MB);
 
-    const void *comment = NULL;
+    void *comment = NULL;
     size_t commentlen = 0;
     int commentfd = 0;
     if (commentfn) {

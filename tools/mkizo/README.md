@@ -17,6 +17,7 @@ The target image:
 
 * is a [.zip archive](http://www.pkware.com/documents/casestudies/APPNOTE.TXT)
 * is also an [ISO9660 filesystem](http://www.ecma-international.org/publications/files/ECMA-ST/Ecma-119.pdf)
+* is [El Torito bootable](http://download.intel.com/support/motherboards/desktop/sb/specscdrom.pdf)
 * can have up to 256 files
 * is an exact multiple of 1MB (for compatibility with VirtualBox)
 

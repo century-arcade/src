@@ -1,5 +1,6 @@
 #include <assert.h>
 #include <unistd.h>
+#include <errno.h>
 #include <stdint.h>
 #include <libgen.h> // dirname, basename
 #include <stdlib.h>
@@ -19,7 +20,8 @@
 
 FILE *fpizo = NULL;
 const char *sourcepath = NULL;
-int verbose = 0;
+int verbose = 0; // -v bumps verbosity (only LOG and VERBOSE for now)
+int force = 0;   // -f unlinks an existing file
 
 typedef struct ISODir {
     const char *name_in_parent;    // just the basename
@@ -47,6 +49,7 @@ ZipCentralDirFileHeader *ziphdrs[256];
 PathTableEntry *paths[256];
 size_t npaths = 0;
 size_t pathtablesize = 0; // keep a running tally
+int64_t blockdevlen = -1; // default is regular file
 
 const char* bootfn = NULL;
 int bootloader_sector = 0; // where the bootfn is stored
@@ -699,7 +702,7 @@ int main(int argc, char **argv)
 
     int opt;
 
-    while ((opt = getopt(argc, argv, "c:o:b:v")) != -1) {
+    while ((opt = getopt(argc, argv, "fc:o:b:v")) != -1) {
         switch (opt) {
         case 'b':         // file containing bootloader
             bootfn = strdup(optarg);
@@ -709,6 +712,9 @@ int main(int argc, char **argv)
             break;
         case 'o':         // output file (required)
             outfn = strdup(optarg);
+            break;
+        case 'f':         // force (use unlink if file exists)
+            force = 1;
             break;
         case 'v':
             verbose++;
@@ -725,7 +731,25 @@ int main(int argc, char **argv)
 
     sourcepath = argv[optind];
 
-    unlink(outfn);
+    struct stat st;
+    if (stat(outfn, &st) < 0) {
+        if (errno != ENOENT) {
+            perror(outfn);
+            exit(-1);
+        }
+    } else {
+        // file exists, what should be done?
+        if (S_ISBLK(st.st_mode)) {  // if block device, final size is known
+            blockdevlen = st.st_size;
+        } else {
+            if (!force) {
+                LOG("Output file '%s' already exists", outfn);
+                exit(-1);
+            }
+
+            unlink(outfn);
+        }
+    }
 
     fpizo = fopen(outfn, "w+b");
     int pvd_sector = alloc_sectors(1);   // Primary Volume Descriptor
@@ -780,11 +804,7 @@ int main(int argc, char **argv)
     FWRITEAT(fpizo, pvd_sector * SECTOR_SIZE, &pvd, sizeof(pvd));
     FWRITEAT(fpizo, vdst_sector * SECTOR_SIZE, VolumeDescriptorSetTerminator, sizeof(VolumeDescriptorSetTerminator));
 
-    // extend to a multiple of 1MB and write the zip comment
-    FSEEK(fpizo, 0, SEEK_END);
-    long endpos = ftell(fpizo);
-    long bytes_left_this_mb = MB - (endpos % MB);
-
+    // get ready to write the central dir (open the zip comment file)
     void *comment = NULL;
     size_t commentlen = 0;
     int commentfd = 0;
@@ -793,12 +813,24 @@ int main(int argc, char **argv)
         zip_cdir_len += commentlen;
     }
 
-    if (bytes_left_this_mb < zip_cdir_len) {
-        endpos += MB;
+    // determine final size of izo
+    long endpos = blockdevlen;
+
+    if (endpos < 0) { // not an existing block device
+        FSEEK(fpizo, 0, SEEK_END);
+        endpos = ftell(fpizo);
+
+        // extend to a multiple of 1MB
+        long bytes_left_this_mb = MB - (endpos % MB);
+
+        if (bytes_left_this_mb < zip_cdir_len) {
+            endpos += MB;
+        }
+
+        endpos += bytes_left_this_mb;
     }
 
-    endpos += bytes_left_this_mb;
-
+    // write the comment
     if (commentfd > 0) {
         FWRITEAT(fpizo, endpos - commentlen, comment, commentlen);
         close(commentfd);
@@ -824,6 +856,7 @@ int main(int argc, char **argv)
 
     FWRITE(fpizo, &endcdir, sizeof(endcdir));
 
+    // and done
     fclose(fpizo);
     return 0;
 }

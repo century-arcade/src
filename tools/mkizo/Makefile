@@ -10,7 +10,7 @@ dumpizo: dumpizo.o
 	gcc -o $@ $^
 
 test: mkizo
-	./mkizo -o test.izo .
+	./mkizo -f -o test.izo .
 	isovfy test.izo
 	isoinfo -i test.izo -d -debug -f
 

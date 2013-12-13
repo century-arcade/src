@@ -1,10 +1,9 @@
 -include .arcaderc
 ARCADE ?= /opt/arcade
 
-ISO2ZIP = $(ARCADE)/src/tools/iso2zip
-VANITY_HASH = $(ARCADE)/src/tools/vanityhash-1.1/vanityhash --append \
-				--workers=8 --digest=sha1 --bits=48 a4cade
-# --bits=48 10decade
+MKIZO = $(ARCADE)/src/tools/mkizo/mkizo
+VANITY_HASHER = $(ARCADE)/src/tools/vainhash/vainhash
+VANITY_OPTS = -w 8 -p dead
 
 BUILDROOT_VER = 2013.08.1
 UCLIBC_VER=0.9.33.2
@@ -77,13 +76,13 @@ endif
 
 PUBL ?= Century Arcade # PUBLISHER_ID
 PREP ?=                  PREPARER_ID
-SYSI ?= Linux          # SYSTEM_ID
+SYSI ?= LINUX          # SYSTEM_ID
 VOLI ?=                  VOLUME_ID
 VOLS ?=                  VOLUMESET_ID
-ABST ?= README         # ABSTRACT_FILE
-APPI ?= Linux          # APPLICATION_ID
-COPY ?= README         # COPYRIGHT_FILE
-BIBL ?= README         # BIBLIOGRAPHIC_FILE
+ABST ?= README.TXT     # ABSTRACT_FILE
+APPI ?= LINUX          # APPLICATION_ID
+COPY ?= README.TXT     # COPYRIGHT_FILE
+BIBL ?= README.TXT     # BIBLIOGRAPHIC_FILE
 
 endif
 
@@ -101,11 +100,14 @@ PLATFORMSRC = $(ARCADE)/src/$(PLATFORM)
 
 ifdef GAME
 ISOROOT = $(BUILDDIR)/$(GAME).isoroot
-
-all: $(GAME)-beta.iso  # $(GAME).iso.zip
+VERSION = -$(PLATFORMVER)$(GAMEVER)
 endif
 
-include $(ARCADE)/src/Makefile.$(PLATFORM)
+all:
+
+include $(ARCADE)/src/$(PLATFORM)/Makefile.inc
+
+all: $(GAME)$(VERSION).iso.zip
 
 $(DOWNLOADS)/linux-$(LINUX_VER).tar.xz:
 	$(WGET) https://www.kernel.org/pub/linux/kernel/v3.x/linux-$(LINUX_VER).tar.xz
@@ -130,9 +132,10 @@ $(LINUXDIR)/.config: $(PLATFORMSRC)/linux.config $(LINUXDIR)/Makefile
 	cp $(PLATFORMSRC)/linux.config $(LINUXDIR)/.config
 
 $(BUSYBOX): $(BUSYBOXDIR)/.config
-	ARCADE=$(ARCADE) make -C $(BUSYBOXDIR) all
+	ARCADE=$(ARCADE) INITRAMFS=$(INITRAMFS) make -C $(BUSYBOXDIR) all
 
 $(KERNEL): $(LINUXDIR)/.config initramfs-setup
+	make -C $(LINUXDIR) modules_install INSTALL_MOD_PATH=${INITRAMFS}
 	make -C $(LINUXDIR) all
 
 kernel-image: $(KERNEL)
@@ -155,7 +158,9 @@ initramfs: $(BUSYBOX)
 	mkdir -p $(INITRAMFS)/sys
 	mkdir -p $(INITRAMFS)/bin
 	mkdir -p $(INITRAMFS)/etc
+	mkdir -p $(INITRAMFS)/tmp
 	mkdir -p $(INITRAMFS)/cdrom
+	mkdir -p $(INITRAMFS)/save
 
 clean-iso:
 	rm -rf $(ISOROOT)
@@ -172,44 +177,43 @@ iso-setup: clean-iso
 	cp $(GAMESRC)/splash.lss $(ISOROOT)/boot/isolinux/
 	/bin/echo -ne "\x18splash.lss\x0a\x1a" > $(ISOROOT)/boot/isolinux/display.msg
 
-%-beta.iso: %.isoroot $(PLATFORM)
-	mkisofs -J -R \
-		-iso-level 1 \
-		-no-pad \
-		-biblio    "$(BIBL)" \
-		-copyright "$(COPY)" \
-		-A         "$(APPI)" \
-		-abstract  "$(ABST)" \
-		-p         "$(PREP)" \
-		-publisher "$(PUBL)" \
-		-sysid     "$(SYSI)" \
-		-V         "$(VOLI)" \
-		-volset    "$(VOLS)" \
-		-b boot/isolinux.bin \
-		-c boot/boot.cat \
-		-no-emul-boot \
-		-boot-load-size 4 \
-		-boot-info-table \
-		-input-charset=iso8859-1 \
+vaingold:
+	truncate --size=8 $@
+
+%$(VERSION).iso: %.isoroot $(PLATFORM) vaingold
+	system_id="$(SYSI)" \
+	volume_id="$(VOLI)" \
+	volume_set_id="$(VOLS)" \
+	preparer_id="$(PREP)" \
+	publisher_id="$(PUBL)" \
+	application_id="$(APPI)" \
+	copyright_file_id="$(COPY)" \
+	abstract_file_id="$(ABST)" \
+	bibliographical_file_id="$(BIBL)" \
+	creation_date="$(CREATED)" \
+	modification_date="$(MODIFIED)" \
+	expiration_date="$(EXPIRES)" \
+	effective_date="$(EFFECTIVE)" \
+		$(MKIZO) -c vaingold \
 		-o $@ \
+		-b boot/isolinux.bin \
 		$(ISOROOT)/
-	truncate --size=%1M $@     # virtualbox needs size to multiple of 1MB
 
-endif
+%$(VERSION).iso.zip: %$(VERSION).iso vanityhasher
+	$(VANITY_HASHER) $(VANITY_OPTS) $<
+	zip $@ $<
 
-%.iso.zip: %-beta.iso $(ISO2ZIP)
-	$(ISO2ZIP) $< -o $*-prehash.izo
-	$(VANITY_HASH) < $*-prehash.izo > $*.iso
-	zip $*.iso.zip.prehash $*.iso
-	$(VANITY_HASH) < $*.iso.zip.prehash > $*.iso.zip
+endif # PLATFORM
 
-%.lss: %.ppm
-	ppmtolss16 < $< > $@
+%.lss: %.jpg
+	$(ARCADE)/src/tools/mksplash.sh $< $@
 
-# use system gcc
-$(ISO2ZIP): $(ARCADE)/src/tools/iso2zip.c
-	gcc -o $@ $<
+izomaker: $(MKIZO)
+	$(MAKE) -C $(ARCADE)/src/tools/mkizo
+
+vanityhasher:
+	$(MAKE) -C $(ARCADE)/src/tools/vainhash
 
 .PHONY: clean
 clean: $(PLATFORM)-clean
-	make -C $(ARCADE)/src/zmachine distclean
+

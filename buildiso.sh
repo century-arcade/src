@@ -1,6 +1,10 @@
 #!/bin/sh
 
-# Usage: buildiso.sh LostPig.zip
+# Usage: buildiso.sh $ARCADE/games/LostPig-source.zip
+#
+# extracts the source materials into LostPig-source.src
+#       and creates the versioned .iso in current directory
+
 GAMESRC=$1
 
 ARCADE=/opt/arcade

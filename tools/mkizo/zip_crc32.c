@@ -1,4 +1,5 @@
 #include <stdint.h>
+#include <stdlib.h>
 
 uint32_t crc32(const uint8_t *buf, size_t bufLen)
 {

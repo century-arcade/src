@@ -15,7 +15,9 @@ WGET := wget --directory-prefix=$(DOWNLOADS)
 
 all:
 
+TOOLCHAINDIR = $(ARCADE)/host
 BUILDROOTDIR = $(ARCADE)/build/buildroot-$(BUILDROOT_VER)
+UCLIBCDIR = $(BUILDROOTDIR)/output/build/uclibc-$(UCLIBC_VER)/
 
 setup: buildroot 
 
@@ -30,8 +32,8 @@ $(ARCADE)/www/index.html:
 $(DOWNLOADS)/buildroot-$(BUILDROOT_VER).tar.bz2:
 	$(WGET) http://buildroot.uclibc.org/downloads/buildroot-$(BUILDROOT_VER).tar.bz2
 
-$(DOWNLOADS)/uclibc-$(UCLIBC_VER).tar.bz2:
-	$(WGET) http://www.uclibc.org/downloads/uClibc-$(UCLIBC_VER).tar.xz
+$(DOWNLOADS)/uClibc-$(UCLIBC_VER).tar.bz2:
+	$(WGET) http://www.uclibc.org/downloads/uClibc-$(UCLIBC_VER).tar.bz2
 
 $(ARCADE)/src/buildroot.config: $(ARCADE)/src/Makefile
 
@@ -42,15 +44,15 @@ $(BUILDROOTDIR)/Makefile: $(DOWNLOADS)/buildroot-$(BUILDROOT_VER).tar.bz2
 	mkdir -p $(ARCADE)/build
 	tar jx -C $(ARCADE)/build -f $<
 
-$(UCLIBCDIR)/Makefile: $(DOWNLOADS)/uclibc-$(UCLIBC_VER).tar.bz2
+$(UCLIBCDIR)/Makefile: $(DOWNLOADS)/uClibc-$(UCLIBC_VER).tar.bz2
 	mkdir -p $(ARCADE)/build
 	tar jx -C $(ARCADE)/build -f $<
 
-$(UCLIBCDIR)/.config: $(PLATFORMSRC)/uclibc.config $(UCLIBCDIR)/Makefile
-	cp $(PLATFORMSRC)/uclibc.config $(UCLIBCDIR)/.config
+$(UCLIBCDIR)/.config: $(ARCADE)/src/uclibc.config $(UCLIBCDIR)/Makefile
+	cp $(ARCADE)/src/uclibc.config $(UCLIBCDIR)/.config
 
 uclibc: $(UCLIBCDIR)/.config $(UCLIBCDIR)/Makefile
-	make -C uclibc all install
+	make -C $(UCLIBCDIR) all install
 
 save-uclibc:
 	cp $(UCLIBCDIR)/.config $(ARCADE)/src/uclibc.config
@@ -133,7 +135,7 @@ $(BUSYBOX): $(BUSYBOXDIR)/.config
 	ARCADE=$(ARCADE) INITRAMFS=$(INITRAMFS) make -C $(BUSYBOXDIR) all
 
 $(KERNEL): $(LINUXDIR)/.config initramfs-setup
-	make -C $(LINUXDIR) modules_install INSTALL_MOD_PATH=${INITRAMFS}
+	make -C $(LINUXDIR) modules modules_install INSTALL_MOD_PATH=${INITRAMFS}
 	make -C $(LINUXDIR) all
 
 kernel-image: $(KERNEL)

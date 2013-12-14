@@ -1,4 +1,5 @@
 
+PLATFORMVER=0.82
 FROTZ = $(PLATFORMSRC)/frotz/frotz 
 
 zmachine: $(KERNEL)
@@ -13,7 +14,7 @@ initramfs-setup: frotz-initramfs
 
 frotz-initramfs: initramfs $(BUSYBOX) frotz
 	mkdir -p $(INITRAMFS)/usr/share/terminfo/l
-	cp $(BR_TARGET)/usr/share/terminfo/l/linux-vt $(INITRAMFS)/usr/share/terminfo/l/linux
+	cp $(TOOLCHAINDIR)/usr/share/terminfo/l/linux-vt $(INITRAMFS)/usr/share/terminfo/l/linux
 	cp $(BUSYBOX) $(INITRAMFS)/bin/busybox
 	cd $(INITRAMFS)/bin ; ln -sf busybox sh
 	cp $(FROTZ) $(INITRAMFS)/bin/frotz

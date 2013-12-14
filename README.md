@@ -9,7 +9,7 @@ A kit for making bootable ready-to-play ISOs of classic games
 2. Install these packages
 
 		# apt-get update
-   		# apt-get install build-essential libgmp3-dev libmpfr-dev libmpc-dev texinfo libncurses5-dev unzip git
+   		# apt-get install git build-essential zip unzip libgmp3-dev libmpfr-dev libmpc-dev texinfo libncurses5-dev
 
 3. Choose the toplevel $ARCADE directory [default /opt/arcade].  Make sure it has at least 10GB free.
 

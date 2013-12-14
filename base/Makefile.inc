@@ -13,7 +13,7 @@ initramfs-setup: base-initramfs
 
 base-initramfs: initramfs $(BUSYBOX)
 	mkdir -p $(INITRAMFS)/usr/share/terminfo/l
-	cp $(BR_TARGET)/usr/share/terminfo/l/linux-vt $(INITRAMFS)/usr/share/terminfo/l/linux
+	cp $(TOOLCHAINDIR)/usr/share/terminfo/l/linux-vt $(INITRAMFS)/usr/share/terminfo/l/linux
 	cp $(BUSYBOX) $(INITRAMFS)/bin/busybox
 	cd $(INITRAMFS)/bin ; ln -sf busybox sh
 	cp $(PLATFORMSRC)/init.sh $(INITRAMFS)/init

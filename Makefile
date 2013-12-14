@@ -181,7 +181,7 @@ iso-setup: clean-iso
 vaingold:
 	truncate --size=8 $@
 
-%$(VERSION).iso: %.isoroot $(PLATFORM) vaingold
+%$(VERSION).iso: %.isoroot $(PLATFORM) vaingold izomaker
 	system_id="$(SYSI)" \
 	volume_id="$(VOLI)" \
 	volume_set_id="$(VOLS)" \
@@ -209,7 +209,7 @@ endif # PLATFORM
 %.lss: %.jpg
 	$(ARCADE)/src/tools/mksplash.sh $< $@
 
-izomaker: $(MKIZO)
+izomaker:
 	$(MAKE) -C $(ARCADE)/src/tools/mkizo
 
 vanityhasher:

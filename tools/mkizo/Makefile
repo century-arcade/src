@@ -4,10 +4,10 @@ CFLAGS=-ggdb
 all: mkizo dumpizo
 
 mkizo: mkizo.o zip_crc32.o
-	gcc -o $@ $^
+	$(CC) -o $@ $^
 
 dumpizo: dumpizo.o
-	gcc -o $@ $^
+	$(CC) -o $@ $^
 
 test: mkizo
 	./mkizo -f -o test.izo .

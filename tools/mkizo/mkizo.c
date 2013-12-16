@@ -1,3 +1,26 @@
+/* The MIT License (MIT)
+
+Copyright (c) 2013 The Century Arcade.  All rights reserved.
+
+Permission is hereby granted, free of charge, to any person obtaining a
+copy of this software and associated documentation files (the "Software"), 
+to deal in the Software without restriction, including without limitation 
+the rights to use, copy, modify, merge, publish, distribute, sublicense, 
+and/or sell copies of the Software, and to permit persons to whom the 
+Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, 
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER 
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING 
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER 
+DEALINGS IN THE SOFTWARE.
+*/
+
 #include <assert.h>
 #include <unistd.h>
 #include <errno.h>
@@ -347,7 +370,7 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
     uint32_t zipcrc = crc32(contents, filesize);
 
     int ziphdr_sector = alloc_sectors(sectors(filesize) + 1);
-    int data_sector = ziphdr_sector + 1;
+    int data_sector = (filesize == 0) ? ziphdr_sector : (ziphdr_sector + 1);
 
     // reconstruct the full path/fn
     char fullfn[256] = { 0 };
@@ -367,7 +390,9 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
         memset(&bootinfotbl[4], 0, 40);
     }
 
-    FWRITEAT(fpizo, data_sector * SECTOR_SIZE, contents, filesize);
+    if (filesize > 0) {
+        FWRITEAT(fpizo, data_sector * SECTOR_SIZE, contents, filesize);
+    }
 
     munmap((void *) contents, filesize);
     close(fd);

@@ -17,7 +17,8 @@ all:
 
 TOOLCHAINDIR = $(ARCADE)/host
 BUILDROOTDIR = $(ARCADE)/build/buildroot-$(BUILDROOT_VER)
-UCLIBCDIR = $(BUILDROOTDIR)/output/build/uclibc-$(UCLIBC_VER)/
+UCLIBCDIR = $(BUILDROOTDIR)/output/build/uclibc-$(UCLIBC_VER)
+SYSROOT = $(TOOLCHAINDIR)/usr/i586-buildroot-linux-uclibc/sysroot
 
 setup: buildroot 
 
@@ -165,18 +166,18 @@ initramfs: $(BUSYBOX)
 
 clean-iso:
 	rm -rf $(ISOROOT)
+	mkdir -p $(ISOROOT)
 
 iso-setup: clean-iso
-	mkdir -p $(ISOROOT)
 	cp $(addprefix $(GAMESRC)/,$(GAMEFILES)) $(ISOROOT)/
 
 %.isoroot: kernel-image iso-setup
 	mkdir -p $(ISOROOT)/boot/isolinux
 	cp $(ARCADE)/images/isolinux.bin $(ISOROOT)/boot/
 	cp $(ARCADE)/images/bzImage.$(PLATFORM) $(ISOROOT)/boot/bzImage
-	cp $(PLATFORMSRC)/isolinux.cfg $(ISOROOT)/boot/isolinux/
-	cp $(GAMESRC)/splash.lss $(ISOROOT)/boot/isolinux/
-	/bin/echo -ne "\x18splash.lss\x0a\x1a" > $(ISOROOT)/boot/isolinux/display.msg
+	cp $(ARCADE)/src/isolinux.cfg $(ISOROOT)/boot/isolinux/
+	cp $(ARCADE)/src/arcade.lss $(ISOROOT)/boot/isolinux/
+	/bin/echo -ne "\x18arcade.lss\x0a\x1a" > $(ISOROOT)/boot/isolinux/display.msg
 
 vaingold:
 	truncate --size=8 $@
@@ -195,7 +196,7 @@ vaingold:
 	modification_date="$(MODIFIED)" \
 	expiration_date="$(EXPIRES)" \
 	effective_date="$(EFFECTIVE)" \
-		$(MKIZO) -c vaingold \
+		$(MKIZO) -f -c vaingold \
 		-o $@ \
 		-b boot/isolinux.bin \
 		$(ISOROOT)/
@@ -216,5 +217,4 @@ vanityhasher:
 	$(MAKE) -C $(ARCADE)/src/tools/vainhash
 
 .PHONY: clean
-clean: $(PLATFORM)-clean
 

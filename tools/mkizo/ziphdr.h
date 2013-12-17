@@ -12,8 +12,7 @@ typedef struct PACKED {
     u16 version_needed;
     u16 bit_flags;
     u16 method;
-    u16 time;
-    u16 date;
+    u32 datetime; // MSDOS Date Time format
     u32 crc32;
     u32 comp_size;
     u32 uncomp_size;
@@ -29,8 +28,7 @@ typedef struct PACKED {
     u16 version_needed;
     u16 bit_flags;
     u16 method;
-    u16 date;
-    u16 time;
+    u32 datetime; // MSDOS Date Time format
     u32 crc32;
     u32 comp_size;
     u32 uncomp_size;

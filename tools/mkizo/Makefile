@@ -10,9 +10,10 @@ dumpizo: dumpizo.o
 	$(CC) -o $@ $^
 
 test: mkizo
-	./mkizo -f -o test.izo .
+	./mkizo -v -f -o test.izo .
 	isovfy test.izo
 	isoinfo -i test.izo -d -debug -f
+	zip -Tv test.izo
 
 clean:
 	rm -f test.izo dumpizo mkizo *.o

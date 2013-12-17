@@ -46,15 +46,17 @@ const char *sourcepath = NULL;
 int verbose = 0; // -v bumps verbosity (only LOG and VERBOSE for now)
 int force = 0;   // -f unlinks an existing file
 
+#define MAX_FILES 256
+
 typedef struct ISODir {
     const char *name_in_parent;    // just the basename
     struct ISODir *parent;
     DirectoryRecord *realrecord;   // same ptr as in parent.records[]
 
-    DirectoryRecord *records[256]; // [0] is self, [1] is parent
+    DirectoryRecord *records[MAX_FILES]; // [0] is self, [1] is parent
     size_t nrecords;
 
-    struct ISODir *subdirs[256];
+    struct ISODir *subdirs[MAX_FILES];
     size_t nsubdirs;
 
     int pte_num;
@@ -62,14 +64,26 @@ typedef struct ISODir {
 
 ISODir root;
 
+u32 MSDOSDateTime(time_t t)
+{
+    struct tm *tm = localtime(&t);
+
+    return (((tm->tm_year - (1980 - 1900)) & 0x7f) << 25)
+         | ((tm->tm_mon+1) << 21) 
+         | (tm->tm_mday << 16) 
+         | (tm->tm_hour << 11) 
+         | (tm->tm_min << 5) 
+         | (tm->tm_sec);
+}
+
 #define LOG(FMTSTR, args...) fprintf(stderr, FMTSTR "\n", ## args)
 #define VERBOSE(FMTSTR, args...) if (verbose) { LOG("%s: " FMTSTR, __FUNCTION__, ##args); }
 
 size_t zip_cdir_len = sizeof(ZipEndCentralDirRecord);
 size_t nzipfiles = 0;   // number of files in zip
-ZipCentralDirFileHeader *ziphdrs[256];
+ZipCentralDirFileHeader *ziphdrs[MAX_FILES];
 
-PathTableEntry *paths[256];
+PathTableEntry *paths[MAX_FILES];
 size_t npaths = 0;
 size_t pathtablesize = 0; // keep a running tally
 int64_t blockdevlen = -1; // default is regular file
@@ -152,22 +166,22 @@ setdate(DecimalDateTime *ddt, const char *strdate)
 // generates a strdate from a time_t for use with setdate
 char * strdate(time_t t) {
     static char buf[256];
-    struct tm tm;
-    memset(&tm, 0, sizeof(tm));
-//  BUG segfault:   localtime_r(&t, &tm);
-    strftime(buf, sizeof(buf), "%Y%m%d%H%M%S00%z", &tm);
+    struct tm *tm = localtime(&t);
+    strftime(buf, sizeof(buf), "%Y%m%d%H%M%S00%z", tm);
     return buf;
 }
 
 void izo_fill_dir_time(DirectoryRecord *dr, time_t t)
 {
-    if (t == 0) return;
+    if (t == 0) { 
+        return;
+    }
 
     struct tm tm;
     gmtime_r(&t, &tm);
-    dr->years_since_1900 = tm.tm_year - 1900;
+    dr->years_since_1900 = tm.tm_year;
     dr->month = tm.tm_mon + 1;
-    dr->day = tm.tm_mday + 1;
+    dr->day = tm.tm_mday;
     dr->hour = tm.tm_hour;
     dr->minute = tm.tm_min;
     dr->second = tm.tm_sec;
@@ -211,7 +225,12 @@ char *strtoupper(char *src)
 static void parsepath(const char *path, char **dirfn, char **leaffn)
 {
     char *duppath = strdup(path);
-    *dirfn = strdup(dirname(duppath));
+    const char *dn = dirname(duppath);
+    if (strcmp(dn, ".") == 0) {
+        *dirfn = NULL;
+    } else {
+        *dirfn = strdup(dn);
+    }
     free(duppath);
 
     duppath = strdup(path);
@@ -221,7 +240,7 @@ static void parsepath(const char *path, char **dirfn, char **leaffn)
 
 ISODir * find_isodir(const char *dirpath)
 {
-    if (strcmp(dirpath, ".") == 0) {
+    if (dirpath == NULL || strcmp(dirpath, ".") == 0) {
         return &root;
     }
 
@@ -268,7 +287,6 @@ DirectoryRecord *newrecord(const char *fn)
 
     // volume_seq_num/volume_set_size is always 1/1
     SET16_LSBMSB(*r, volume_seq_num, 1);
-//    izo_fill_dir_time(r, time(NULL));
 
     r->id_len = id_len;
 
@@ -308,6 +326,10 @@ ISODir * mkisodir(const char *dirname, const char *basename)
         DirectoryRecord *r = newdirrecord(uppername);
         d->parent->records[d->parent->nrecords++] = r;
         d->parent->subdirs[d->parent->nsubdirs++] = d; 
+
+        assert(d->parent->nrecords < MAX_FILES);
+        assert(d->parent->nsubdirs < MAX_FILES);
+
         d->realrecord = r;
         d->records[0] = newdirrecord("\x00"); // .
     }
@@ -332,14 +354,12 @@ size_t dirsize(const ISODir *d)
     return dirsize;
 }
 
-int openmapfile(const char *fn, void **outptr, size_t *outlen)
+int openmapfile(const char *fn, void **outptr, struct stat *outstat)
 {
     if (fn == NULL)
         return -1;
 
-    struct stat st;
-
-    STAT(fn, &st);
+    STAT(fn, outstat);
 
     int fd = open(fn, O_RDONLY);
     if (fd < 0) {
@@ -348,8 +368,7 @@ int openmapfile(const char *fn, void **outptr, size_t *outlen)
     } 
  
     // allow private writes for the boot-info-table
-    *outptr = mmap(NULL, st.st_size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
-    *outlen = st.st_size;
+    *outptr = mmap(NULL, outstat->st_size, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
 
     return fd;
 }
@@ -358,13 +377,15 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
 {
     ISODir *parent = find_isodir(isodirname);
 
-    size_t filesize = 0;
     char *contents = NULL;
 
-    int fd = openmapfile(localfn, (void **) &contents, &filesize);
+    struct stat st;
+    int fd = openmapfile(localfn, (void **) &contents, &st);
     if (fd < 0) {
         return -1;    
     }
+
+    const size_t filesize = st.st_size;
 
     // combine the crc and copy
     uint32_t zipcrc = crc32(contents, filesize);
@@ -374,7 +395,11 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
 
     // reconstruct the full path/fn
     char fullfn[256] = { 0 };
-    snprintf(fullfn, sizeof(fullfn), "%s/%s", isodirname, isofn);
+    if (isodirname) {
+        snprintf(fullfn, sizeof(fullfn), "%s/%s", isodirname, isofn);
+    } else {
+        strcpy(fullfn, isofn);
+    }
 
     // check if this is the bootloader
     if (bootfn && strcmp(fullfn, bootfn) == 0) {
@@ -422,7 +447,7 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
     // volume_seq_num/volume_set_size is always 1/1
     SET16_LSBMSB(*r, volume_seq_num, 1);
 
-//    izo_fill_dir_time(sb.entry, time(NULL));
+    izo_fill_dir_time(r, st.st_mtime);
 
     r->id_len = id_len;
     strcpy(r->id, isofn);
@@ -447,8 +472,11 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
 
     chdr->signature = 0x02014b50;
     lhdr->signature = 0x04034b50;
-    chdr->date = lhdr->date = 0x00;
-    chdr->time = lhdr->time = 0x00;
+
+    chdr->version_needed = lhdr->version_needed = 10; // 1.0 is most basic level
+
+    chdr->datetime = lhdr->datetime = MSDOSDateTime(st.st_mtime);
+
     chdr->crc32 = lhdr->crc32 = zipcrc;
     chdr->comp_size = chdr->uncomp_size = 
         lhdr->comp_size = lhdr->uncomp_size = filesize;
@@ -463,6 +491,7 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
 
     // save off central dir header for later
     ziphdrs[nzipfiles++] = chdr;
+    assert(nzipfiles < MAX_FILES);
     zip_cdir_len += chdrlen;
 
     return 0;
@@ -486,7 +515,10 @@ int ftw_mkfile_helper(const char *fpath, const struct stat *sb, int typeflag)
     if (typeflag == FTW_F) {
         mkfile(fpath, parentdirname, nodename);
     } else if (typeflag == FTW_D) {
-        mkisodir(parentdirname, nodename);
+        ISODir *d = mkisodir(parentdirname, nodename);
+        struct stat st;
+        STAT(fpath, &st);
+        izo_fill_dir_time(d->realrecord, st.st_mtime);
     } else {
         perror("ftw_mkfile_helper");
         return -2;
@@ -834,7 +866,9 @@ int main(int argc, char **argv)
     size_t commentlen = 0;
     int commentfd = 0;
     if (commentfn) {
-        commentfd = openmapfile(commentfn, &comment, &commentlen);
+        struct stat st;
+        commentfd = openmapfile(commentfn, &comment, &st);
+        commentlen = st.st_size;
         zip_cdir_len += commentlen;
     }
 

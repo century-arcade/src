@@ -13,12 +13,17 @@ BUSYBOX_VER = 1.21.1
 DOWNLOADS = $(ARCADE)/downloads
 WGET := wget --directory-prefix=$(DOWNLOADS)
 
+ARCADE_CC = $(TOOLCHAINDIR)/usr/bin/i586-linux-gcc
+ARCADE_CXX = $(TOOLCHAINDIR)/usr/bin/i586-linux-g++
+
 all:
 
 TOOLCHAINDIR = $(ARCADE)/host
 BUILDROOTDIR = $(ARCADE)/build/buildroot-$(BUILDROOT_VER)
 UCLIBCDIR = $(BUILDROOTDIR)/output/build/uclibc-$(UCLIBC_VER)
 SYSROOT = $(TOOLCHAINDIR)/usr/i586-buildroot-linux-uclibc/sysroot
+
+export PATH := $(TOOLCHAINDIR)/usr/bin:$(SYSROOT)/usr/bin:$(PATH)
 
 setup: buildroot 
 
@@ -36,14 +41,25 @@ $(DOWNLOADS)/buildroot-$(BUILDROOT_VER).tar.bz2:
 $(DOWNLOADS)/uClibc-$(UCLIBC_VER).tar.bz2:
 	$(WGET) http://www.uclibc.org/downloads/uClibc-$(UCLIBC_VER).tar.bz2
 
-$(ARCADE)/src/buildroot.config: $(ARCADE)/src/Makefile
+$(ARCADE)/src/buildroot.defconfig: $(ARCADE)/src/Makefile
 
-$(BUILDROOTDIR)/.config: $(ARCADE)/src/buildroot.config $(BUILDROOTDIR)/Makefile
-	cp $(ARCADE)/src/buildroot.config $(BUILDROOTDIR)/.config
+BR_PATCHES = $(addsuffix .patched,$(addprefix $(BUILDROOTDIR)/,$(notdir $(basename $(wildcard $(ARCADE)/src/buildroot-patches/*.patch)))))
+
+$(BUILDROOTDIR)/.config: $(ARCADE)/src/buildroot.defconfig $(BUILDROOTDIR)/Makefile $(BR_PATCHES)
+	echo $(BR_PATCHES)
+	make -C $(BUILDROOTDIR) defconfig BR2_DEFCONFIG=$(ARCADE)/src/buildroot.defconfig
+
+save-buildroot:
+	make -C $(BUILDROOTDIR) savedefconfig BR2_DEFCONFIG=$(ARCADE)/src/buildroot.defconfig
 
 $(BUILDROOTDIR)/Makefile: $(DOWNLOADS)/buildroot-$(BUILDROOT_VER).tar.bz2
 	mkdir -p $(ARCADE)/build
 	tar jx -C $(ARCADE)/build -f $<
+
+
+$(BUILDROOTDIR)/%.patched: $(ARCADE)/src/buildroot-patches/%.patch
+	patch -d $(BUILDROOTDIR) -p1 < $<
+	touch $@
 
 $(UCLIBCDIR)/Makefile: $(DOWNLOADS)/uClibc-$(UCLIBC_VER).tar.bz2
 	mkdir -p $(ARCADE)/build
@@ -169,7 +185,9 @@ clean-iso:
 	mkdir -p $(ISOROOT)
 
 iso-setup: clean-iso
+ifdef GAMEFILES
 	cp $(addprefix $(GAMESRC)/,$(GAMEFILES)) $(ISOROOT)/
+endif
 
 %.isoroot: kernel-image iso-setup
 	mkdir -p $(ISOROOT)/boot/isolinux

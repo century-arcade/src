@@ -22,16 +22,14 @@ A kit for making bootable ready-to-play ISOs of classic games
 
 5. Setup buildroot and build the toolchain.  This downloads ~200MB and uses 2.5GB of disk.
 
-    	$ ln -s $ARCADE/src/Makefile $ARCADE/Makefile
-    	$ PATH="$PATH:$ARCADE/host/usr/bin"
-    	$ make -C $ARCADE setup
+    	$ make -C $ARCADE/src setup
 
 ## To build the ISO for a game
 
-1. Download the game source package (like [LostPig-source.zip]()) and unzip into a folder like $ARCADE/games/GameFolder.src
+1. Download the game source package (like [LostPig-source.zip]()) and unzip into a folder like $ARCADE/games/GameFolder-source
 
-2. make GAMESRC=$ARCADE/games/GameFolder.src
+2. make GAMESRC=$ARCADE/games/GameFolder-source
 
 ## Notes
 
-Makefile tries to include .arcaderc very first thing for default GAMESRC and PROJECT values for development purposes (so a bare 'make' actually does something reasonable).
+Makefile tries to include .arcaderc (from the current directory) very first thing for default GAMESRC and PROJECT values for development purposes (so a bare 'make' actually does something reasonable).

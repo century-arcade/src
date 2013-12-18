@@ -278,7 +278,7 @@ DirectoryRecord *newrecord(const char *fn)
     }
 
     DirectoryRecord *r =
-        (DirectoryRecord *) malloc(sizeof(DirectoryRecord) + id_len);
+        (DirectoryRecord *) malloc(sizeof(DirectoryRecord) + id_len + 1);
 
     // will also set id[0] to 0x0 if fn == NULL (as for root dir)
     memset(r, 0, sizeof(DirectoryRecord) + id_len);
@@ -463,7 +463,7 @@ int mkfile(const char *localfn, const char *isodirname, const char *isofn)
     id_len = strlen(fullfn);
 
     size_t chdrlen = sizeof(ZipCentralDirFileHeader) + id_len;
-    ZipCentralDirFileHeader * chdr = (ZipCentralDirFileHeader *) malloc(chdrlen);
+    ZipCentralDirFileHeader * chdr = (ZipCentralDirFileHeader *) malloc(chdrlen + 1);
     memset(chdr, 0, chdrlen);
 
     size_t lhdrlen = sizeof(ZipLocalFileHeader) + id_len;

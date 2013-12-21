@@ -1,0 +1,12 @@
+--- buildroot-2013.11-unpatched/package/sdl_image/sdl_image.mk	2013-11-30 05:16:03.000000000 -0800
++++ buildroot-2013.11-patched/package/sdl_image/sdl_image.mk	2013-12-17 16:31:19.968826207 -0800
+@@ -14,7 +14,8 @@
+ SDL_IMAGE_CONF_OPT = --with-sdl-prefix=$(STAGING_DIR)/usr \
+ 		--with-sdl-exec-prefix=$(STAGING_DIR)/usr \
+ 		--disable-sdltest \
+-		--disable-static \
++		--enable-static \
++		--enable-shared \
+ 		--disable-jpg-shared \
+ 		--disable-png-shared \
+ 		--disable-tif-shared \

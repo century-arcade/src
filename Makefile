@@ -4,6 +4,8 @@ ARCADE ?= /opt/arcade
 MKIZO = $(ARCADE)/src/tools/mkizo/mkizo
 VANITY_HASHER = $(ARCADE)/src/tools/vainhash/vainhash
 VANITY_OPTS = -w 8 -p dead
+TINYALSA= $(ARCADE)/src/tools/tinyalsa
+TINYPLAY= $(ARCADE)/src/tools/tinyplay
 
 BUILDROOT_VER = 2013.11
 UCLIBC_VER=0.9.33.2
@@ -75,9 +77,8 @@ save-uclibc:
 	cp $(UCLIBCDIR)/.config $(ARCADE)/src/uclibc.config
 
 buildroot: $(BUILDROOTDIR)/.config $(BUILDROOTDIR)/Makefile
-	mkdir -p $(ARCADE)/images
 	ARCADE=$(ARCADE) make -C $(BUILDROOTDIR) V=1
-	cp $(BUILDROOTDIR)/output/images/isolinux.bin $(ARCADE)/images/
+	ln -sf $(TOOLCHAINDIR)/usr/i586-buildroot-linux-uclibc/sysroot $(TOOLCHAINDIR)/sysroot
 
 ifdef GAMESRC
 
@@ -151,25 +152,21 @@ $(LINUXDIR)/.config: $(PLATFORMSRC)/linux.config $(LINUXDIR)/Makefile
 $(BUSYBOX): $(BUSYBOXDIR)/.config
 	ARCADE=$(ARCADE) INITRAMFS=$(INITRAMFS) make -C $(BUSYBOXDIR) all
 
-$(KERNEL): $(LINUXDIR)/.config initramfs-setup
+$(KERNEL): $(LINUXDIR)/.config $(PLATFORM)-initramfs
+	cp $(ARCADE)/src/assets/arcade_ascii_224.ppm $(LINUXDIR)/drivers/video/logo/logo_linux_clut224.ppm
 	make -C $(LINUXDIR) modules modules_install INSTALL_MOD_PATH=${INITRAMFS}
 	make -C $(LINUXDIR) all
 
-kernel-image: $(KERNEL)
-	cp $(KERNEL) $(ARCADE)/images/bzImage.$(PLATFORM)
-	
-busybox-image: $(BUSYBOX)
-	cp $(BUSYBOX) $(ARCADE)/images/busybox.$(PLATFORM)
-
-save-busybox: busybox-image
+save-busybox: $(BUSYBOX)
 	cp $(BUSYBOXDIR)/.config $(PLATFORMSRC)/busybox.config
 
-save-linux: kernel-image
+save-linux: $(KERNEL)
 	cp $(LINUXDIR)/.config $(PLATFORMSRC)/linux.config
 
 save-config: save-linux save-busybox
 
-initramfs: $(BUSYBOX)
+clean-initramfs:
+	rm -rf $(INITRAMFS)
 	mkdir -p $(INITRAMFS)/dev
 	mkdir -p $(INITRAMFS)/proc
 	mkdir -p $(INITRAMFS)/sbin
@@ -180,22 +177,18 @@ initramfs: $(BUSYBOX)
 	mkdir -p $(INITRAMFS)/cdrom
 	mkdir -p $(INITRAMFS)/save
 
-clean-iso:
-	rm -rf $(ISOROOT)
-	mkdir -p $(ISOROOT)
+$(PLATFORM)-initramfs:
 
-iso-setup: clean-iso
+clean-isoroot:
+	rm -rf $(ISOROOT)
+	mkdir -p $(ISOROOT)/boot/isolinux
 ifdef GAMEFILES
 	cp $(addprefix $(GAMESRC)/,$(GAMEFILES)) $(ISOROOT)/
 endif
 
-%.isoroot: kernel-image iso-setup
-	mkdir -p $(ISOROOT)/boot/isolinux
-	cp $(ARCADE)/images/isolinux.bin $(ISOROOT)/boot/
-	cp $(ARCADE)/images/bzImage.$(PLATFORM) $(ISOROOT)/boot/bzImage
-	cp $(ARCADE)/src/isolinux.cfg $(ISOROOT)/boot/isolinux/
-	cp $(ARCADE)/src/arcade.lss $(ISOROOT)/boot/isolinux/
-	/bin/echo -ne "\x18arcade.lss\x0a\x1a" > $(ISOROOT)/boot/isolinux/display.msg
+%.isoroot: $(KERNEL) $(PLATFORM)-isoroot
+	cp $(BUILDROOTDIR)/output/images/isolinux.bin $(ISOROOT)/boot/
+	cp $(KERNEL) $(ISOROOT)/boot/bzImage
 
 vaingold:
 	truncate --size=8 $@
@@ -225,14 +218,24 @@ vaingold:
 
 endif # PLATFORM
 
-%.lss: %.jpg
-	$(ARCADE)/src/tools/mksplash.sh $< $@
-
 izomaker:
 	$(MAKE) -C $(ARCADE)/src/tools/mkizo
 
 vanityhasher:
 	$(MAKE) -C $(ARCADE)/src/tools/vainhash
 
+TINYPLAY_SRCS= $(addprefix $(TINYALSA)/, mixer.c pcm.c tinyplay.c)
+
+$(TINYPLAY): $(TINYPLAY_SRCS)
+	$(ARCADE_CC) -static -o $@ -I$(TINYALSA)/include $(TINYPLAY_SRCS)
+
+#$(FBSHOW): $(ARCADE)/src/sdl/fbshow.c
+#	$(ARCADE_CC) -static -o $@ $(ARCADE)/src/sdl/fbshow.c -lpng -lz
+
 .PHONY: clean
+
+clean: $(PLATFORM)-clean
+
+# in case the platform doesn't define it because there's nothing to do
+$(PLATFORM)-clean:
 

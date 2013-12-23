@@ -177,7 +177,7 @@ clean-initramfs:
 	mkdir -p $(INITRAMFS)/cdrom
 	mkdir -p $(INITRAMFS)/save
 
-$(PLATFORM)-initramfs:
+$(PLATFORM)-initramfs: clean-initramfs
 
 clean-isoroot:
 	rm -rf $(ISOROOT)

@@ -1,0 +1,18 @@
+http://uclibc.10924.n7.nabble.com/uclibc-3-3-2-with-gcc-4-7-td10224.html
+--- buildroot-unpatched/package/uclibc/uclibc.mk	2013-12-20 23:53:41.316353145 -0800
++++ buildroot-patched/package/uclibc/uclibc.mk	2013-12-20 23:53:53.653084476 -0800
+@@ -390,14 +390,6 @@
+ endif
+ 
+ #
+-# debug
+-#
+-
+-ifeq ($(BR2_ENABLE_DEBUG),y)
+-UCLIBC_DEBUG_CONFIG = $(call UCLIBC_OPT_SET,DODEBUG,y,$(@D))
+-endif
+-
+-#
+ # strip
+ #
+ 

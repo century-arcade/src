@@ -18,3 +18,13 @@
 
 # personal config
 .arcaderc
+
+# ignore final outputs
+*.iso.zip
+*.iso
+*.zip
+*.izo.zip
+
+# no files will be added in the vice tree, so this sledgehammer works to ignore
+# all autoconf-generated files
+c64/vice-2.4/*

@@ -3,7 +3,7 @@ ARCADE ?= /opt/arcade
 
 MKIZO = $(ARCADE)/src/tools/mkizo/mkizo
 VANITY_HASHER = $(ARCADE)/src/tools/vainhash/vainhash
-VANITY_OPTS = -w 8 -p dead
+VANITY_OPTS = -w 8 -p cade
 TINYALSA= $(ARCADE)/src/tools/tinyalsa
 TINYPLAY= $(ARCADE)/src/tools/tinyplay
 
@@ -189,9 +189,6 @@ endif
 %.isoroot: $(KERNEL) $(PLATFORM)-isoroot
 	cp $(BUILDROOTDIR)/output/images/isolinux.bin $(ISOROOT)/boot/
 	cp $(KERNEL) $(ISOROOT)/boot/bzImage
-
-vaingold:
-	truncate --size=8 $@
 
 %$(VERSION).iso: %.isoroot $(PLATFORM) vaingold izomaker
 	system_id="$(SYSI)" \

@@ -16,17 +16,15 @@ echo /sbin/hotplug > /proc/sys/kernel/hotplug
 
 /bin/busybox modprobe piix
 
-# while not exist /cdrom/boot,
-
-/bin/busybox mount -t iso9660 /dev/hdc /cdrom
-
-# endwhile
+while [ ! -d /cdrom/boot ] ; do
+    /bin/busybox mount -t iso9660 /dev/hdc /cdrom
+done
 
 /sbin/restore_save
 
 cd /cdrom
 
-/bin/title-init
+/bin/busybox openvt -w -c 1 /bin/sh /bin/title-init
 
 # show an end screen of some kind
 /bin/busybox openvt -w -c 1 /bin/sh

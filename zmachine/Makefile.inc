@@ -8,7 +8,7 @@ $(FROTZ):
 
 zmachine-initramfs: busybox-initramfs $(FROTZ)
 	cp $(FROTZ) $(INITRAMFS)/bin/frotz
-	cp $(PLATFORMSRC)/init.sh $(INITRAMFS)/init
+	echo '/bin/frotz /cdrom/*.z?' > $(TITLE_INIT)
 
 zmachine-isoroot:
 	cp $(PLATFORMSRC)/frotz.conf $(ISOROOT)/

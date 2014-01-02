@@ -8,6 +8,7 @@ echo /sbin/hotplug > /proc/sys/kernel/hotplug
 /bin/busybox mdev -s
 
 /bin/busybox modprobe snd_ens1370
+/bin/busybox modprobe snd_intel8x0
 
 # show splash screen from initramfs while cdrom is detected
 # /bin/fbshow /splash.png

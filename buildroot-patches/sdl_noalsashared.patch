@@ -1,0 +1,14 @@
+--- buildroot-2013.11-unpatched/package/sdl/sdl.mk.orig	2014-01-03 15:33:24.653703338 -0800
++++ buildroot-2013.11-patched/package/sdl/sdl.mk	2014-01-03 15:33:32.599513768 -0800
+@@ -57,7 +57,10 @@
+ 		--disable-arts \
+ 		--disable-esd \
+ 		--disable-nasm \
+-		--disable-video-ps3
++		--disable-video-ps3 \
++		--disable-alsa-shared \
++		--disable-shared \
++		--disable-sdl-dlopen
+ 
+ SDL_CONFIG_SCRIPTS = sdl-config
+ 

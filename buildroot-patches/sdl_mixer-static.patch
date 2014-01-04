@@ -1,0 +1,16 @@
+--- buildroot-unpatched/package/sdl_mixer/sdl_mixer.mk	2014-01-04 01:15:55.054152311 -0800
++++ buildroot-patched/package/sdl_mixer/sdl_mixer.mk	2014-01-04 01:15:59.461052034 -0800
+@@ -35,11 +35,11 @@
+ endif
+ 
+ define SDL_MIXER_INSTALL_TARGET_CMDS
+-	cp -dpf $(STAGING_DIR)/usr/lib/libSDL_mixer*.so* $(TARGET_DIR)/usr/lib/
++	cp -dpf $(STAGING_DIR)/usr/lib/libSDL_mixer* $(TARGET_DIR)/usr/lib/
+ endef
+ 
+ define SDL_MIXER_CLEAN_CMDS
+-	rm -f $(TARGET_DIR)/usr/lib/libSDL_mixer*.so*
++	rm -f $(TARGET_DIR)/usr/lib/libSDL_mixer*
+ 	-$(MAKE) DESTDIR=$(STAGING_DIR) -C $(@D) uninstall
+ 	-$(MAKE) -C $(@D) clean
+ endef

@@ -6,7 +6,7 @@
  		--disable-sdltest \
 -		--disable-static \
 +		--enable-static \
-+		--enable-shared \
++		--disable-shared \
  		--disable-jpg-shared \
  		--disable-png-shared \
  		--disable-tif-shared \

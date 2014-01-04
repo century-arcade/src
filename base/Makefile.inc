@@ -65,6 +65,7 @@ clean-initramfs:
 	mkdir -p $(INITRAMFS)/sbin
 	mkdir -p $(INITRAMFS)/sys
 	mkdir -p $(INITRAMFS)/bin
+	mkdir -p $(INITRAMFS)/lib
 	mkdir -p $(INITRAMFS)/etc
 	mkdir -p $(INITRAMFS)/tmp
 	mkdir -p $(INITRAMFS)/cdrom

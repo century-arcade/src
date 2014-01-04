@@ -1791,7 +1791,7 @@ if test x"$with_sdlsound" = "xyes" -o x"$enable_sdlui" = "xyes"; then
         else
             CFLAGS="$CFLAGS `$sdl_config --cflags`"
             CXXFLAGS="$CXXFLAGS `$sdl_config --cflags`"
-            LIBS="$LIBS `$sdl_config --libs`"
+            LIBS="$LIBS `$sdl_config --libs` -ldl"
         fi
 
 

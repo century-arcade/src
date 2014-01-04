@@ -1,4 +1,4 @@
-PLATFORMVER=0.1
+PLATFORMVER=0.7
 
 VICEVER = 2.4
 VICEDIR = $(ARCADE)/src/c64/vice-$(VICEVER)
@@ -31,7 +31,7 @@ $(X64):
 	--without-residfp  \
 	--without-png  \
 	--without-zlib 
-	make CROSS=true -C $(VICEDIR) all
+	make CROSS=true -C $(VICEDIR) all x64sc
 
 c64-initramfs: busybox-initramfs $(X64)
 	strip $(X64)

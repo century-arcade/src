@@ -1,7 +1,10 @@
-PLATFORMVER=0.91
+PLATFORMVER ?= 0.91
 #
 # The 'base' platform should include all relevant drivers and utilities.
 #
+
+BOOT_LOGO ?= $(ARCADE)/src/assets/century-arcade.png
+#BOOT_WAV ?= $(ARCADE)/src/assets/retro-game-jingle.wav 
 
 LINUX_VER = 3.10.23
 BUSYBOX_VER = 1.21.1
@@ -45,8 +48,18 @@ $(BUSYBOXDIR)/.config: $(BASESRC)/busybox.config $(BUSYBOXDIR)/Makefile
 $(LINUXDIR)/.config: $(BASESRC)/linux.config $(LINUXDIR)/Makefile
 	cp $(BASESRC)/linux.config $(LINUXDIR)/.config
 
-$(KERNEL): $(LINUXDIR)/.config $(PLATFORM)-initramfs
-	cp $(ARCADE)/src/assets/arcade_ascii_224.ppm $(LINUXDIR)/drivers/video/logo/logo_linux_clut224.ppm
+LOGOPPM = $(ARCADE)/src/assets/arcade_ascii_224.ppm
+
+.PHONY: $(LOGOPPM)
+
+#	ppmquant -mapfile $(ARCADE)/src/base/ppmquant.pnm $<.ppm > $<_224.ppm
+$(LOGOPPM): $(BOOT_LOGO)
+	convert $< $<.ppm
+	ppmquant 224 $<.ppm > $<_224.ppm
+	pnmnoraw $<_224.ppm > $@
+
+$(KERNEL): $(LINUXDIR)/.config $(GAME)-initramfs $(LOGOPPM)
+	cp $(LOGOPPM) $(LINUXDIR)/drivers/video/logo/logo_linux_clut224.ppm
 	make -C $(LINUXDIR) modules modules_install INSTALL_MOD_PATH=${INITRAMFS}
 	make -C $(LINUXDIR) all
 
@@ -74,13 +87,17 @@ clean-initramfs:
 # platforms that inherit from base might not need to add anything to initramfs
 $(PLATFORM)-initramfs: clean-initramfs
 
+$(GAME)-initramfs: $(PLATFORM)-initramfs
+
 # busybox.config should have the install prefix set to ${INITRAMFS}
 base-initramfs: clean-initramfs $(TINYPLAY)
 	cp $(ARCADE)/src/base/init.sh $(INITRAMFS)/init
 	cp $(ARCADE)/src/sbin/* $(INITRAMFS)/sbin/
+ifdef BOOT_WAV	
 	cp $(TINYPLAY) $(INITRAMFS)/bin
-	cp $(ARCADE)/src/assets/retro-game-jingle.wav $(INITRAMFS)/startup.wav
-#	cp $(ARCADE)/src/assets/arcade.png $(INITRAMFS)/splash.png
+	cp $(BOOT_WAV) $(INITRAMFS)/startup.wav
+endif
+#	cp $(BOOT_LOGO) $(INITRAMFS)/splash.png
 
 console-initramfs: base-initramfs
 	mkdir -p $(INITRAMFS)/usr/share/terminfo/l

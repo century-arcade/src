@@ -123,13 +123,17 @@ endif
 
 include $(ARCADE)/src/$(PLATFORM)/Makefile.inc
 
-all: $(PLATFORM)-$(GAME)$(VERSION).izo.zip
+all: $(GAME)-$(PLATFORM)$(VERSION).izo.zip
 
 clean-isoroot:
 	rm -rf $(ISOROOT)
 	mkdir -p $(ISOROOT)
 ifdef GAMEFILES
 	cp $(addprefix $(GAMESRC)/,$(GAMEFILES)) $(ISOROOT)/
+endif
+ifdef SPOILERS
+	mkdir $(ISOROOT)/spoilers
+	cp $(addprefix $(GAMESRC)/,$(SPOILERS)) $(ISOROOT)/spoilers
 endif
 
 $(PLATFORM)-isoroot: base-isoroot

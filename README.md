@@ -20,23 +20,23 @@ A kit for making bootable ready-to-play ISOs of classic games
 
     	$ git clone https://github.com/century-arcade/src.git $ARCADE/src
 
-5. Setup buildroot and build the toolchain.  This downloads ~200MB and uses 2.5GB of disk.
+5. Build the toolchain.  This downloads ~200MB and uses 2.5GB of disk under the `$ARCADE` directory.
 
-    	$ make -C $ARCADE/src setup
+    	$ make -C $ARCADE/src toolchain
 
 ## To build the ISO for a game
 
-1. Download the game source package (like [LostPig-source.zip]()) and unzip into a folder like `$ARCADE/games/GameTitle-source`.
+1. Download the game source package (like [LostPig-source.zip]()) and unzip into a folder (like `$ARCADE/games/LostPig-source`).
 
-2. `make GAMESRC=$ARCADE/games/GameTitle-source`
+2. `make GAMESRC=$ARCADE/games/LostPig-source`
 
-3. The `GameTitle-1.01r3.iso.zip` will be in the current directory.
+3. The `LostPig-zmachine.iso` will be in the current directory.
 
 ## To play an ISO with qemu
 
-1. Unzip the .iso.zip to get the .iso.
+0. [For a release: unzip the .izo.zip to get the .iso.
 
-2. `QEMU_AUDIO_DRV=alsa qemu-system-i386 -soundhw all -cdrom GameTitle-1.01r3.iso`
+1. `QEMU_AUDIO_DRV=alsa qemu-system-i386 -soundhw all -cdrom LostPig-zmachine.iso`
 
 ## Notes
 

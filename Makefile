@@ -14,6 +14,9 @@ WGET := wget --directory-prefix=$(DOWNLOADS)
 ARCADE_CC = $(TOOLCHAINDIR)/usr/bin/i586-linux-gcc
 ARCADE_CXX = $(TOOLCHAINDIR)/usr/bin/i586-linux-g++
 
+BR2_DEFCONFIG=$(ARCADE)/src/buildroot.defconfig 
+UCLIBC_CONFIG=$(ARCADE)/src/uclibc.config 
+
 all: # so first rule isn't accidentally overridden
 
 TOOLCHAINDIR = $(ARCADE)/host
@@ -27,7 +30,10 @@ SYSROOT = $(TOOLCHAINDIR)/sysroot
 
 export PATH := $(TOOLCHAINDIR)/usr/bin:$(SYSROOT)/usr/bin:$(PATH)
 
-setup: buildroot 
+toolchain: buildroot 
+
+clean-toolchain:
+	rm -rf $(BUILDROOTDIR) $(TOOLCHAINDIR)
 
 setup-git: $(ARCADE)/src/Makefile $(ARCADE)/www/index.html
 
@@ -57,15 +63,15 @@ $(BUILDROOTDIR)/%.patched: $(ARCADE)/src/buildroot-patches/%.patch
 	patch -d $(BUILDROOTDIR) -p1 < $<
 	touch $@
 
-$(BUILDROOTDIR)/.config: $(ARCADE)/src/buildroot.defconfig $(BUILDROOTDIR)/Makefile $(BR_PATCHES)
-	make -C $(BUILDROOTDIR) defconfig BR2_DEFCONFIG=$(ARCADE)/src/buildroot.defconfig
+$(BUILDROOTDIR)/.config: $(BR2_DEFCONFIG) $(BUILDROOTDIR)/Makefile $(BR_PATCHES)
+	make -C $(BUILDROOTDIR) defconfig BR2_DEFCONFIG=$(BR2_DEFCONFIG)
 
 buildroot: $(BUILDROOTDIR)/.config $(BUILDROOTDIR)/Makefile
 	ARCADE=$(ARCADE) make -C $(BUILDROOTDIR) V=1
 	ln -sf $(TOOLCHAINDIR)/usr/i586-buildroot-linux-uclibc/sysroot $(TOOLCHAINDIR)/sysroot
 
 save-buildroot:
-	make -C $(BUILDROOTDIR) savedefconfig BR2_DEFCONFIG=$(ARCADE)/src/buildroot.defconfig
+	make -C $(BUILDROOTDIR) savedefconfig BR2_DEFCONFIG=$(BR2_DEFCONFIG)
 
 
 ### uclibc configuration and build
@@ -76,14 +82,14 @@ $(UCLIBCDIR)/Makefile: $(DOWNLOADS)/uClibc-$(UCLIBC_VER).tar.bz2
 	mkdir -p $(ARCADE)/build
 	tar jx -C $(ARCADE)/build -f $<
 
-$(UCLIBCDIR)/.config: $(ARCADE)/src/uclibc.config $(UCLIBCDIR)/Makefile
-	cp $(ARCADE)/src/uclibc.config $(UCLIBCDIR)/.config # XXX defconfig
+$(UCLIBCDIR)/.config: $(UCLIBC_CONFIG) $(UCLIBCDIR)/Makefile
+	cp $(UCLIBC_CONFIG) $(UCLIBCDIR)/.config # XXX defconfig
 
 uclibc: $(UCLIBCDIR)/.config $(UCLIBCDIR)/Makefile
 	make -C $(UCLIBCDIR) all install
 
 save-uclibc:
-	cp $(UCLIBCDIR)/.config $(ARCADE)/src/uclibc.config
+	cp $(UCLIBCDIR)/.config $(UCLIBC_CONFIG)
 
 ### game IZO construction
 
@@ -123,7 +129,9 @@ endif
 
 include $(ARCADE)/src/$(PLATFORM)/Makefile.inc
 
-all: $(GAME)-$(PLATFORM)$(VERSION).izo.zip
+all: $(GAME)-$(PLATFORM).iso
+
+release: $(GAME)-$(PLATFORM)$(VERSION).izo.zip
 
 clean-isoroot:
 	rm -rf $(ISOROOT)
@@ -138,7 +146,7 @@ endif
 
 $(PLATFORM)-isoroot: base-isoroot
 
-%$(VERSION).iso: $(PLATFORM)-isoroot vaingold $(MKIZO)
+%.iso: $(PLATFORM)-isoroot vaingold $(MKIZO)
 	system_id="$(SYSI)" \
 	volume_id="$(VOLI)" \
 	volume_set_id="$(VOLS)" \
@@ -157,7 +165,7 @@ $(PLATFORM)-isoroot: base-isoroot
 		-b boot/isolinux.bin \
 		$(ISOROOT)/
 
-%$(VERSION).izo.zip: %$(VERSION).iso vanityhasher
+%.izo.zip: %.iso vanityhasher
 	$(VANITY_HASHER) $(VANITY_OPTS) $<
 	zip $@ $<
 

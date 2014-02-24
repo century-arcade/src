@@ -89,13 +89,29 @@ $(PLATFORM)-initramfs: clean-initramfs
 
 $(GAME)-initramfs: $(PLATFORM)-initramfs
 
+UTILS=$(addprefix $(SYSROOT)/usr/bin/, \
+	  playsound \
+	  playsound_simple \
+	  speaker-test \
+	  alsamixer \
+	  amixer)
+
 # busybox.config should have the install prefix set to ${INITRAMFS}
 base-initramfs: clean-initramfs $(TINYPLAY)
 	cp $(ARCADE)/src/base/init.sh $(INITRAMFS)/init
 	cp $(ARCADE)/src/sbin/* $(INITRAMFS)/sbin/
+	mkdir -p $(INITRAMFS)/usr/share/alsa
+	cp -R $(BUILDROOTDIR)/output/target/usr/share/alsa/* $(INITRAMFS)/usr/share/alsa/
+	cp -R $(BUILDROOTDIR)/output/target/etc/* $(INITRAMFS)/etc
 ifdef BOOT_WAV	
-	cp $(TINYPLAY) $(INITRAMFS)/bin
 	cp $(BOOT_WAV) $(INITRAMFS)/startup.wav
+endif
+ifdef DEBUG
+	cp $(BUILDROOTDIR)/output/build/alsa-utils-1.0.26/aplay/aplay $(INITRAMFS)/bin/
+	cp $(BUILDROOTDIR)/output/build/sdl_mixer-1.2.12/build/playwave $(INITRAMFS)/bin/
+	cp $(TINYPLAY) $(INITRAMFS)/bin
+	cp $(UTILS) $(INITRAMFS)/bin
+	cp $(BUILDROOTDIR)/output/build/strace-4.8/strace $(INITRAMFS)/bin
 endif
 #	cp $(BOOT_LOGO) $(INITRAMFS)/splash.png
 
@@ -114,7 +130,6 @@ base-isoroot: $(KERNEL) clean-isoroot
 
 base-clean:
 	# actions to take on 'make clean' for this platform
-
 
 TINYPLAY_SRCS= $(addprefix $(TINYALSA)/, mixer.c pcm.c tinyplay.c)
 

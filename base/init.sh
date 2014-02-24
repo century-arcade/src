@@ -12,7 +12,7 @@ echo /sbin/hotplug > /proc/sys/kernel/hotplug
 
 # show splash screen from initramfs while cdrom is detected
 # /bin/fbshow /splash.png
-/bin/tinyplay /startup.wav &
+# /bin/tinyplay /startup.wav &
 
 /bin/busybox modprobe piix
 

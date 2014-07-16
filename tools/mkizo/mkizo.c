@@ -713,7 +713,7 @@ fill_pvd(PrimaryVolumeDescriptor *pvd)
 }
 
 void usage_and_exit(const char *binname) {
-    fprintf(stderr, "Usage: %s [-v] [-c <comment>] -o <output-izo-name> <path-to-walk>\n", 
+    fprintf(stderr, "Usage: %s [-v] [-f] [-c <commentfn>] [-b <bootsectorfn>] -o <output-izo-name> <path-to-walk>\n", 
             binname);
     exit(EXIT_FAILURE);
 }

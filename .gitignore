@@ -15,6 +15,7 @@
 *.exe
 *.out
 *.app
+tools/vainhash/vainhash
 
 # personal config
 .arcaderc

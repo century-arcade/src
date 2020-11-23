@@ -1,10 +1,12 @@
 
 #include <assert.h>
 #include <sys/param.h> // MIN
+#include <sys/time.h> // gettimeofday
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <stdio.h> // fprintf
 #include <stdlib.h> // exit
+#include <unistd.h> // read
 #include <fcntl.h> // O_RDWR
 #include <getopt.h>
 #include <signal.h>

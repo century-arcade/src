@@ -19,3 +19,8 @@ creating a 'vanity hash'.
 ## See Also
 
 * [`vanityhash`](http://www.finnie.org/software/vanityhash/) by [Ryan Finnie](http://www.finnie.org).  Written in Perl; appends instead of modifying in-place.
+
+# The SHA1 hash for this README starts with `ADDEDFEE`.
+
+wPr5FLDYpV
+

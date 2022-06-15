@@ -90,7 +90,8 @@ main(int argc, char *const argv[])
     sha1_context *ctx = (sha1_context *) malloc(sizeof(sha1_context));
     sha1_starts(ctx);
 
-    uint64_t junk = 0;
+    uint64_t junkval = 0;
+    char junk[12];
 
     size_t bytes_left = st.st_size - sizeof(junk);
     while (bytes_left > 0)
@@ -112,14 +113,16 @@ main(int argc, char *const argv[])
         exit(EXIT_FAILURE);
     }
 
-    if (!force && junk != 0) {
-        fprintf(stderr, "existing junk is non-zero!  use -f to force\n");
-        exit(EXIT_FAILURE);
+    for (int i=0; i < sizeof(junk); ++i) {
+        if (!force && junk[i] != 0) {
+            fprintf(stderr, "existing junk is non-zero!  use -f to force\n");
+            exit(EXIT_FAILURE);
+        }
     }
 
     // save a copy of the context
     // (to get SHA1 of original file, update with junk of 0 and finish)
- 
+
     sha1_context *humblectx = (sha1_context *) malloc(sizeof(sha1_context));
     memcpy(humblectx, ctx, sizeof(sha1_context));
 
@@ -158,17 +161,25 @@ main(int argc, char *const argv[])
     gettimeofday(&tv_start, NULL);
 
     // pre-populate junk (so restarted runs don't re-do the same junk)
-    junk = (tv_start.tv_sec << 32) | tv_start.tv_usec;
+    junkval = (tv_start.tv_sec << 32) | tv_start.tv_usec;
 
     // give each worker its own 56-bit segment of the space.
-    junk &= 0x00FFFFFFFFFFFFFFULL;
-    junk |= ((uint64_t) w) << 56;
+    junkval &= 0x00FFFFFFFFFFFFFFULL;
+    junkval |= ((uint64_t) w) << 56;
 
     unsigned long long num_tried = 0;
 
     while (! done) {
         // restore state
         memcpy(ctx, humblectx, sizeof(sha1_context));
+
+        uint64_t j = junkval;
+        for (int i=0; i < 10; ++i) {
+            junk[i] = " ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_$#!+"[j & 0x3F];
+            j >>= 6;
+        }
+        junk[10] = '\n';
+        junk[11] = '\n';
 
         // try some junk
         sha1_update(ctx, (const unsigned char *) &junk, sizeof(junk));
@@ -196,10 +207,10 @@ main(int argc, char *const argv[])
         }
 
         ++num_tried;
-        ++junk;
+        ++junkval;
 
         // trying to stagger worker status updates
-        if ((junk & 0x00fffff) == (w << 19)) {
+        if ((junkval & 0x00fffff) == (w << 19)) {
             struct timeval tv_now;
             gettimeofday(&tv_now, NULL);
 
@@ -212,7 +223,7 @@ main(int argc, char *const argv[])
 
             // assume other workers are getting as many done as we are
             unsigned int rate = 0;
-            
+
             if (elapsed_secs > 0) {
                 rate = num_tried * num_workers / elapsed_secs;
             }
@@ -226,7 +237,7 @@ main(int argc, char *const argv[])
             kill(children[w], SIGCHLD);
         }
     }
-  
+
     close(fd);
 
     return 0;
